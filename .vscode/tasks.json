@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PlatformIO: Upload and Monitor",
+      "type": "shell",
+      "command": "C:/Users/ybara/.platformio/penv/Scripts/platformio.exe",
+      "args": [
+        "run",
+        "--target",
+        "upload",
+        "--target",
+        "monitor"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}
