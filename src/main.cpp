@@ -114,14 +114,17 @@ void showGraph(float bmpF, float shtF, float diffF, unsigned long elapsedSeconds
   char minBuf[12];
   char statusBuf[24];
   char countBuf[12];
-  snprintf(maxBuf, sizeof(maxBuf), "%.2f", maxDiff);
-  snprintf(midBuf, sizeof(midBuf), "%.2f", diffF);
-  snprintf(minBuf, sizeof(minBuf), "%.2f", minDiff);
+  // Use 6.2f if any value is negative, else 5.2f
+  bool hasNegative = (diffF < 0.0f) || (minDiff < 0.0f) || (maxDiff < 0.0f);
+  const char *yFmt = hasNegative ? "%5.2f" : "%4.2f";
+  snprintf(maxBuf, sizeof(maxBuf), yFmt, maxDiff);
+  snprintf(midBuf, sizeof(midBuf), yFmt, diffF);
+  snprintf(minBuf, sizeof(minBuf), yFmt, minDiff);
   snprintf(statusBuf, sizeof(statusBuf), "BMP=%.2f SHT=%.2f", bmpF, shtF);
   snprintf(countBuf, sizeof(countBuf), "%lu", elapsedSeconds);
 
-  bool hasNegative = (diffF < 0.0f) || (minDiff < 0.0f) || (maxDiff < 0.0f);
-  int graphLeftOffset = hasNegative ? 1 : 0;
+  // If any Y-axis value is negative, shift graph by 1 character (6 pixels)
+  int graphLeftOffset = hasNegative ? 6 : 0; // 6 pixels = 1 character in 5x7 font + 1px space
   int effectiveGraphLeft = GRAPH_LEFT + graphLeftOffset;
 
   u8g2.clearBuffer();
