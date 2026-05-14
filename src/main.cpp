@@ -14,8 +14,9 @@ Adafruit_BMP280 bme;
 Adafruit_SHT31 sht31;
 
 unsigned long lastRead = 0;
+unsigned long startupTime = 0;
 int readCount = 0;
-constexpr unsigned long READ_INTERVAL_SECONDS = 1;
+constexpr unsigned long READ_INTERVAL_SECONDS = 2;
 
 constexpr int DISPLAY_WIDTH = 128;
 constexpr int GRAPH_LEFT = 24;
@@ -103,7 +104,7 @@ void scanI2C() {
   Serial.printf("Scan complete. %d device(s) found.\n\n", found);
 }
 
-void showGraph(float bmpF, float shtF, float diffF, int count) {
+void showGraph(float bmpF, float shtF, float diffF, unsigned long elapsedSeconds) {
   float minDiff = 0.0f;
   float maxDiff = 0.0f;
   getDiffMinMax(minDiff, maxDiff);
@@ -117,7 +118,11 @@ void showGraph(float bmpF, float shtF, float diffF, int count) {
   snprintf(midBuf, sizeof(midBuf), "%.2f", diffF);
   snprintf(minBuf, sizeof(minBuf), "%.2f", minDiff);
   snprintf(statusBuf, sizeof(statusBuf), "BMP=%.2f SHT=%.2f", bmpF, shtF);
-  snprintf(countBuf, sizeof(countBuf), "%d", count);
+  snprintf(countBuf, sizeof(countBuf), "%lu", elapsedSeconds);
+
+  bool hasNegative = (diffF < 0.0f) || (minDiff < 0.0f) || (maxDiff < 0.0f);
+  int graphLeftOffset = hasNegative ? 1 : 0;
+  int effectiveGraphLeft = GRAPH_LEFT + graphLeftOffset;
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_5x7_tr);
@@ -126,23 +131,23 @@ void showGraph(float bmpF, float shtF, float diffF, int count) {
   u8g2.drawStr(0, GRAPH_BOTTOM, minBuf);
 
   // Draw Y axis and graph boundary lines.
-  u8g2.drawVLine(GRAPH_LEFT - 1, GRAPH_TOP, GRAPH_HEIGHT);
-  u8g2.drawHLine(GRAPH_LEFT - 1, GRAPH_BOTTOM, GRAPH_WIDTH + 1);
+  u8g2.drawVLine(effectiveGraphLeft - 1, GRAPH_TOP, GRAPH_HEIGHT);
+  u8g2.drawHLine(effectiveGraphLeft - 1, GRAPH_BOTTOM, GRAPH_WIDTH);
 
   int yMaxTick = diffToGraphY(maxDiff, minDiff, maxDiff);
   int yMinTick = diffToGraphY(minDiff, minDiff, maxDiff);
   int yDiffTick = diffToGraphY(diffF, minDiff, maxDiff);
-  u8g2.drawHLine(GRAPH_LEFT - 4, yMaxTick, 4);
-  u8g2.drawHLine(GRAPH_LEFT - 4, yMinTick, 4);
-  u8g2.drawHLine(GRAPH_LEFT - 4, yDiffTick, 4);
+  u8g2.drawHLine(effectiveGraphLeft - 4, yMaxTick, 4);
+  u8g2.drawHLine(effectiveGraphLeft - 4, yMinTick, 4);
+  u8g2.drawHLine(effectiveGraphLeft - 4, yDiffTick, 4);
 
   if (diffHistoryCount == 1) {
     int y = diffToGraphY(diffHistory[0], minDiff, maxDiff);
-    u8g2.drawPixel(GRAPH_LEFT, y);
+    u8g2.drawPixel(effectiveGraphLeft, y);
   } else if (diffHistoryCount > 1) {
     for (int i = 1; i < diffHistoryCount; i++) {
-      int x0 = GRAPH_LEFT + i - 1;
-      int x1 = GRAPH_LEFT + i;
+      int x0 = effectiveGraphLeft + i - 1;
+      int x1 = effectiveGraphLeft + i;
       int y0 = diffToGraphY(diffHistory[i - 1], minDiff, maxDiff);
       int y1 = diffToGraphY(diffHistory[i], minDiff, maxDiff);
       u8g2.drawLine(x0, y0, x1, y1);
@@ -165,8 +170,9 @@ void readAndDisplay() {
   float diffF = bmpF - shtF;
   updateLifetimeDiff(diffF);
   pushDiffHistory(diffF);
+  unsigned long elapsedSeconds = (millis() - startupTime) / 1000UL;
   Serial.printf("Read #%d - BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n", readCount, bmpF, shtF, diffF);
-  showGraph(bmpF, shtF, diffF, readCount);
+  showGraph(bmpF, shtF, diffF, elapsedSeconds);
 }
 
 void setup() {
@@ -179,6 +185,7 @@ void setup() {
   bme.begin(0x76);
   sht31.begin(0x44);
 
+  startupTime = millis();
   readAndDisplay();
   lastRead = millis();
 }
