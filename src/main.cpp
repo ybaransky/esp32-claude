@@ -6,6 +6,7 @@
 #include "graph.h"
 #include "config.h"
 #include "web.h"
+#include "button.h"
 
 constexpr uint8_t I2C_SDA_PIN = 22;
 constexpr uint8_t I2C_SCL_PIN = 21;
@@ -64,12 +65,15 @@ void setup() {
   ApConfig cfg = loadApConfig();
   webBegin(cfg.ssid.c_str(), cfg.password.c_str());
 
+  buttonSetup();
+
   startupTime = millis();
   readAndDisplay();
   lastRead = millis();
 }
 
 void loop() {
+  buttonTick();
   webHandleClients();
 
   if (millis() - lastRead >= (READ_INTERVAL_SECONDS * 1000UL)) {
