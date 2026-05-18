@@ -4,7 +4,8 @@
 struct SensorReadings {
     float bmpF;
     float shtF;
-    float diffF;
+    float difF;
+    unsigned long readTime;
 };
 
 void webBegin(const char *ssid, const char *password);

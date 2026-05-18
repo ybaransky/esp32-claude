@@ -1,4 +1,6 @@
 #include "button.h"
+#include "graph.h"
+#include "i2c_scanner.h"
 #include <OneButton.h>  // mathertel/OneButton
 #include <Arduino.h>
 
@@ -10,6 +12,7 @@ static OneButton btn(BUTTON_PIN, true, true);
 
 static void onClick() {
     Serial.println("[BTN] Single press detected");
+    resetLifetimeBounds();
     digitalWrite(LED_PIN, HIGH);
     delay(200);
     digitalWrite(LED_PIN, LOW);
@@ -17,6 +20,7 @@ static void onClick() {
 
 static void onDoubleClick() {
     Serial.println("[BTN] Double click detected");
+    scanI2C();
 }
 
 void buttonSetup() {

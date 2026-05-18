@@ -1,43 +1,48 @@
 #include "graph.h"
 #include <string.h>
+#include <math.h>
 
-static float diffHistory[GRAPH_WIDTH];
-static int   diffHistoryCount = 0;
-static float lifetimeMinDiff  = 0.0f;
-static float lifetimeMaxDiff  = 0.0f;
-static bool  hasLifetimeDiff  = false;
+static float graphHistory[GRAPH_WIDTH];
+static int   graphHistoryCount = 0;
+static Bounds lifetimeBounds = {0.0f, 0.0f, false};
+static Bounds windowBounds = {0.0f, 0.0f, false};
 
-void pushDiffHistory(float diffF) {
-  if (diffHistoryCount < GRAPH_WIDTH) {
-    diffHistory[diffHistoryCount++] = diffF;
+void pushGraphHistory(float data) {
+  if (graphHistoryCount < GRAPH_WIDTH) {
+    graphHistory[graphHistoryCount++] = data;
     return;
   }
 
-  memmove(diffHistory, diffHistory + 1, sizeof(float) * (GRAPH_WIDTH - 1));
-  diffHistory[GRAPH_WIDTH - 1] = diffF;
+  memmove(graphHistory, graphHistory + 1, sizeof(float) * (GRAPH_WIDTH - 1));
+  graphHistory[GRAPH_WIDTH - 1] = data;
 }
 
-void updateLifetimeDiff(float diffF) {
-  if (!hasLifetimeDiff) {
-    lifetimeMinDiff = diffF;
-    lifetimeMaxDiff = diffF;
-    hasLifetimeDiff = true;
-    return;
+void updateBounds(Bounds &bounds, float data) {
+  if (!bounds.valid) {
+    bounds.valid = true;
+    bounds.maximum = data;
+    bounds.minimum = data;
+  } else {
+    bounds.minimum = fminf(bounds.minimum,data);
+    bounds.maximum = fminf(bounds.maximum,data);
   }
-
-  if (diffF < lifetimeMinDiff) lifetimeMinDiff = diffF;
-  if (diffF > lifetimeMaxDiff) lifetimeMaxDiff = diffF;
 }
 
-static void getDiffMinMax(float &minDiff, float &maxDiff) {
-  if (!hasLifetimeDiff) {
+Bounds getPaddedBounds(const Bounds &bounds, float data) {
+  float span = bounds.maximum - bounds.minimum;
+  float pad  = (span > 0.0f) ? span * 0.05f : 0.1f * data;
+  return {bounds.minimum - pad, bounds.maximum + pad, true};
+}
+
+static void getCurrentMinMax(float &minDiff, float &maxDiff) {
+  if (!hasLifetimeBounds) {
     minDiff = -0.1f;
     maxDiff =  0.1f;
     return;
   }
 
-  minDiff = lifetimeMinDiff;
-  maxDiff = lifetimeMaxDiff;
+  minDiff = lifetimeBounds.minimum;
+  maxDiff = lifetimeBounds.maximum;
 
   float span = maxDiff - minDiff;
   float pad  = (span > 0.0f) ? span * 0.05f : (fabsf(maxDiff) > 0.0f ? fabsf(maxDiff) * 0.05f : 0.05f);
@@ -45,29 +50,34 @@ static void getDiffMinMax(float &minDiff, float &maxDiff) {
   minDiff -= pad;
 }
 
+void resetLifetimeBounds() {
+  float minDiff, maxDiff;
+  getCurrentMinMax(minDiff, maxDiff);
+  lifetimeBounds.minimum = minDiff;
+  lifetimeBounds.maximum = maxDiff;
+}
+
 static int diffToGraphY(float value, float minDiff, float maxDiff) {
   float normalized = (value - minDiff) / (maxDiff - minDiff);
-  if (normalized < 0.0f) normalized = 0.0f;
-  if (normalized > 1.0f) normalized = 1.0f;
+  normalized = fmaxf(0.0f, fminf(1.0f, normalized));
   return GRAPH_BOTTOM - static_cast<int>(normalized * (GRAPH_HEIGHT - 1) + 0.5f);
 }
 
-void showGraph(U8G2 &u8g2, float bmpF, float shtF, float diffF, unsigned long elapsedSeconds) {
-  float minDiff = 0.0f;
-  float maxDiff = 0.0f;
-  getDiffMinMax(minDiff, maxDiff);
+void showGraph(U8G2 &u8g2, const SensorReadings &readings) {
+  Bounds windowBounds = {0.0f, 0.0f};
+  getCurrentMinMax(windowBounds.minimum, windowBounds.maximum);
 
-  bool hasNegative = (diffF < 0.0f) || (minDiff < 0.0f) || (maxDiff < 0.0f);
+  bool hasNegative = (readings.difF < 0.0f) || (windowBounds.minimum < 0.0f) || (windowBounds.maximum < 0.0f);
   const char *yFmt = hasNegative ? "%5.2f" : "%4.2f";
   int graphLeftOffset  = hasNegative ? 6 : 0;
   int effectiveGraphLeft = GRAPH_LEFT + graphLeftOffset;
 
   char maxBuf[12], midBuf[12], minBuf[12], statusBuf[24], countBuf[12];
-  snprintf(maxBuf,    sizeof(maxBuf),    yFmt,           maxDiff);
-  snprintf(midBuf,    sizeof(midBuf),    yFmt,           diffF);
-  snprintf(minBuf,    sizeof(minBuf),    yFmt,           minDiff);
-  snprintf(statusBuf, sizeof(statusBuf), "BMP=%.2f SHT=%.2f", bmpF, shtF);
-  snprintf(countBuf,  sizeof(countBuf),  "%lu",          elapsedSeconds);
+  snprintf(maxBuf,    sizeof(maxBuf),    yFmt,           windowBounds.maximum);
+  snprintf(midBuf,    sizeof(midBuf),    yFmt,           readings.difF);
+  snprintf(minBuf,    sizeof(minBuf),    yFmt,           windowBounds.minimum);
+  snprintf(statusBuf, sizeof(statusBuf), "BMP=%.2f SHT=%.2f", readings.bmpF, readings.shtF);
+  snprintf(countBuf,  sizeof(countBuf),  "%lu",          readings.readTime / 1000UL);
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_5x7_tr);
@@ -78,17 +88,17 @@ void showGraph(U8G2 &u8g2, float bmpF, float shtF, float diffF, unsigned long el
   u8g2.drawVLine(effectiveGraphLeft - 1, GRAPH_TOP, GRAPH_HEIGHT);
   u8g2.drawHLine(effectiveGraphLeft - 1, GRAPH_BOTTOM, GRAPH_WIDTH);
 
-  u8g2.drawHLine(effectiveGraphLeft - 4, diffToGraphY(maxDiff, minDiff, maxDiff), 4);
-  u8g2.drawHLine(effectiveGraphLeft - 4, diffToGraphY(minDiff, minDiff, maxDiff), 4);
-  u8g2.drawHLine(effectiveGraphLeft - 4, diffToGraphY(diffF,   minDiff, maxDiff), 4);
+  u8g2.drawHLine(effectiveGraphLeft - 4, diffToGraphY(windowBounds.maximum, windowBounds.minimum, windowBounds.maximum), 4);
+  u8g2.drawHLine(effectiveGraphLeft - 4, diffToGraphY(windowBounds.minimum, windowBounds.minimum, windowBounds.maximum), 4);
+  u8g2.drawHLine(effectiveGraphLeft - 4, diffToGraphY(readings.difF, windowBounds.minimum, windowBounds.maximum), 4);
 
-  if (diffHistoryCount == 1) {
-    u8g2.drawPixel(effectiveGraphLeft, diffToGraphY(diffHistory[0], minDiff, maxDiff));
+  if (graphHistoryCount == 1) {
+    u8g2.drawPixel(effectiveGraphLeft, diffToGraphY(graphHistory[0], windowBounds.minimum, windowBounds.maximum));
   } else {
-    for (int i = 1; i < diffHistoryCount; i++) {
+    for (int i = 1; i < graphHistoryCount; i++) {
       u8g2.drawLine(
-        effectiveGraphLeft + i - 1, diffToGraphY(diffHistory[i - 1], minDiff, maxDiff),
-        effectiveGraphLeft + i,     diffToGraphY(diffHistory[i],     minDiff, maxDiff)
+        effectiveGraphLeft + i - 1, diffToGraphY(graphHistory[i - 1], windowBounds.minimum, windowBounds.maximum),
+        effectiveGraphLeft + i,     diffToGraphY(graphHistory[i],     windowBounds.minimum, windowBounds.maximum)
       );
     }
   }

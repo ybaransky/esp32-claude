@@ -3,14 +3,14 @@
 #include <ArduinoJson.h>
 
 ApConfig loadApConfig() {
-    ApConfig cfg{"ESP32-Sensor", "12345678"};
+    ApConfig cfg{"ClimateFraud", "12345678"};
 
-    if (!LittleFS.begin(true)) {
-        Serial.println("LittleFS mount failed, using default AP config");
+    if (!STORAGE.begin(true)) {
+        Serial.println("STORAGE mount failed, using default AP config");
         return cfg;
     }
 
-    File f = LittleFS.open("/config.json", "r");
+    File f = STORAGE.open("/config.json", "r");
     if (!f) {
         Serial.println("config.json not found, using default AP config");
         return cfg;

@@ -1,56 +1,30 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <U8g2lib.h>
-#include <Adafruit_BMP280.h>
-#include <Adafruit_SHT31.h>
 #include "graph.h"
 #include "config.h"
 #include "web.h"
 #include "button.h"
+#include "sensors.h"
+#include "i2c_scanner.h"
 
 constexpr uint8_t I2C_SDA_PIN = 22;
 constexpr uint8_t I2C_SCL_PIN = 21;
 
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, I2C_SCL_PIN, I2C_SDA_PIN);
-Adafruit_BMP280 bme;
-Adafruit_SHT31  sht31;
 
-unsigned long lastRead    = 0;
-unsigned long startupTime = 0;
-int readCount = 0;
 
 constexpr unsigned long READ_INTERVAL_SECONDS = 2;
 
-void scanI2C() {
-  Serial.println("Scanning I2C bus...");
-  int found = 0;
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.printf("  Found device at 0x%02X\n", addr);
-      found++;
-    }
-  }
-  Serial.printf("Scan complete. %d device(s) found.\n\n", found);
-}
+void displayValues(const SensorReadings &readings) {
+  // readings has a legal value
+  updateLifetimeBounds(readings.difF);
+  updateWindowBounds(readings.diffF);
+  pushGraphHistory(readings.difF);
+  webUpdate(readings);
 
-void readAndDisplay() {
-  readCount++;
-  if (readCount == 1 || (readCount % 10) == 0) {
-    scanI2C();
-  }
-
-  float bmpF  = bme.readTemperature()   * 9.0f / 5.0f + 32.0f;
-  float shtF  = sht31.readTemperature() * 9.0f / 5.0f + 32.0f;
-  float diffF = bmpF - shtF;
-
-  updateLifetimeDiff(diffF);
-  pushDiffHistory(diffF);
-  webUpdate({bmpF, shtF, diffF});
-
-  unsigned long elapsedSeconds = (millis() - startupTime) / 1000UL;
-  Serial.printf("Read #%d - BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n", readCount, bmpF, shtF, diffF);
-  showGraph(u8g2, bmpF, shtF, diffF, elapsedSeconds);
+  Serial.printf("BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n", readings.bmpF, readings.shtF, readings.difF);
+  showGraph(u8g2, readings);
 }
 
 void setup() {
@@ -59,25 +33,24 @@ void setup() {
   // u8g2.begin() initializes Wire using the pins passed in the constructor.
   u8g2.begin();
 
-  bme.begin(0x76);
-  sht31.begin(0x44);
+  sensorsInit(I2C_SDA_PIN, I2C_SCL_PIN);
 
   ApConfig cfg = loadApConfig();
   webBegin(cfg.ssid.c_str(), cfg.password.c_str());
 
   buttonSetup();
-
-  startupTime = millis();
-  readAndDisplay();
-  lastRead = millis();
+  scanI2C();
 }
 
 void loop() {
+  static unsigned long lastUpdate = 0;
+  unsigned long now = millis();
+
   buttonTick();
   webHandleClients();
-
-  if (millis() - lastRead >= (READ_INTERVAL_SECONDS * 1000UL)) {
-    lastRead = millis();
-    readAndDisplay();
+  if (now - lastUpdate >= (READ_INTERVAL_SECONDS * 1000UL)) {
+    SensorReadings const& readings = readSensors();
+    displayValues(readings);
+    lastUpdate = now;
   }
 }

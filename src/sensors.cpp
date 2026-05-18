@@ -1,0 +1,26 @@
+#include "sensors.h"
+#include "i2c_scanner.h"
+#include <Wire.h>
+#include <Adafruit_BMP280.h>
+#include <Adafruit_SHT31.h>
+
+Adafruit_BMP280 bme;
+Adafruit_SHT31  sht31;
+static SensorReadings currentReadings = {0.0f, 0.0f, 0.0f, 0};
+
+void sensorsInit(uint8_t sdaPin, uint8_t sclPin) {
+  // Wire is already initialized by u8g2.begin()
+  bme.begin(0x76);
+  sht31.begin(0x44);
+}
+
+const SensorReadings& readSensors(bool force) {
+  unsigned long now = millis();
+  if (force || now - currentReadings.readTime >= 1000UL) {
+    currentReadings.bmpF = bme.readTemperature()   * 9.0f / 5.0f + 32.0f;
+    currentReadings.shtF = sht31.readTemperature() * 9.0f / 5.0f + 32.0f;
+    currentReadings.difF = currentReadings.bmpF - currentReadings.shtF;
+    currentReadings.readTime = now;
+  }
+  return currentReadings;
+}
