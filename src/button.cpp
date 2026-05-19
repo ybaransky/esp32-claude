@@ -12,7 +12,7 @@ static OneButton btn(BUTTON_PIN, true, true);
 
 static void onClick() {
     Serial.println("[BTN] Single press detected");
-    resetLifetimeBounds();
+    resetGraphBounds();
     digitalWrite(LED_PIN, HIGH);
     delay(200);
     digitalWrite(LED_PIN, LOW);

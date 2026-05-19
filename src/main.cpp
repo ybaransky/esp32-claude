@@ -18,12 +18,11 @@ constexpr unsigned long READ_INTERVAL_SECONDS = 2;
 
 void displayValues(const SensorReadings &readings) {
   // readings has a legal value
-  updateLifetimeBounds(readings.difF);
-  updateWindowBounds(readings.diffF);
-  pushGraphHistory(readings.difF);
+  updateDataBounds(readings.deltaF);
+  pushGraphHistory(readings.deltaF);
   webUpdate(readings);
 
-  Serial.printf("BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n", readings.bmpF, readings.shtF, readings.difF);
+  Serial.printf("BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n", readings.bmpF, readings.shtF, readings.deltaF);
   showGraph(u8g2, readings);
 }
 
@@ -39,7 +38,7 @@ void setup() {
   webBegin(cfg.ssid.c_str(), cfg.password.c_str());
 
   buttonSetup();
-  scanI2C();
+//  scanI2C();
 }
 
 void loop() {
@@ -48,6 +47,7 @@ void loop() {
 
   buttonTick();
   webHandleClients();
+
   if (now - lastUpdate >= (READ_INTERVAL_SECONDS * 1000UL)) {
     SensorReadings const& readings = readSensors();
     displayValues(readings);

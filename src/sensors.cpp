@@ -19,7 +19,7 @@ const SensorReadings& readSensors(bool force) {
   if (force || now - currentReadings.readTime >= 1000UL) {
     currentReadings.bmpF = bme.readTemperature()   * 9.0f / 5.0f + 32.0f;
     currentReadings.shtF = sht31.readTemperature() * 9.0f / 5.0f + 32.0f;
-    currentReadings.difF = currentReadings.bmpF - currentReadings.shtF;
+    currentReadings.deltaF = currentReadings.bmpF - currentReadings.shtF;
     currentReadings.readTime = now;
   }
   return currentReadings;

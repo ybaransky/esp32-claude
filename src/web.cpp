@@ -85,7 +85,7 @@ static void handleApiSensors() {
     char buf[72];
     snprintf(buf, sizeof(buf),
              "{\"bmp\":%.2f,\"sht\":%.2f,\"diff\":%.2f}",
-             latest.bmpF, latest.shtF, latest.difF);
+             latest.bmpF, latest.shtF, latest.deltaF);
     server.send(200, "application/json", buf);
 }
 
@@ -106,7 +106,7 @@ static void handleApiSht() {
 static void handleApiDiff() {
     logRequest(200);
     char buf[24];
-    snprintf(buf, sizeof(buf), "{\"diff\":%.2f}", latest.difF);
+    snprintf(buf, sizeof(buf), "{\"diff\":%.2f}", latest.deltaF);
     server.send(200, "application/json", buf);
 }
 

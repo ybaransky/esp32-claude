@@ -4,7 +4,7 @@
 struct SensorReadings {
     float bmpF;
     float shtF;
-    float difF;
+    float deltaF;
     unsigned long readTime;
 };
 
