@@ -10,9 +10,19 @@ constexpr uint8_t LED_PIN    = 2;   // ESP32 dev board built-in LED
 // Pin 23, active-low, internal pull-up enabled.
 static OneButton btn(BUTTON_PIN, true, true);
 
+static volatile bool networkStatusPending = false;
+
+bool buttonNetworkStatusPending() {
+    return networkStatusPending;
+}
+
+void buttonClearNetworkStatus() {
+    networkStatusPending = false;
+}
+
 static void onClick() {
     Serial.println("[BTN] Single press detected");
-    resetGraphBounds();
+    networkStatusPending = true;
     digitalWrite(LED_PIN, HIGH);
     delay(200);
     digitalWrite(LED_PIN, LOW);
@@ -20,7 +30,10 @@ static void onClick() {
 
 static void onDoubleClick() {
     Serial.println("[BTN] Double click detected");
-    scanI2C();
+    digitalWrite(LED_PIN, HIGH);
+    delay(200);
+    digitalWrite(LED_PIN, LOW);
+    resetGraphBounds(2);
 }
 
 void buttonSetup() {

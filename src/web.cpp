@@ -56,6 +56,11 @@ static const char INDEX_HTML[] = R"rawliteral(
 </html>
 )rawliteral";
 
+void webGetApInfo(String &ssid, String &ip) {
+    ssid = WiFi.softAPSSID();
+    ip   = WiFi.softAPIP().toString();
+}
+
 static const char *methodName(HTTPMethod m) {
     switch (m) {
         case HTTP_GET:    return "GET";

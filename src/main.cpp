@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 #include "graph.h"
+#include "display.h"
 #include "config.h"
 #include "web.h"
 #include "button.h"
@@ -13,17 +14,14 @@ constexpr uint8_t I2C_SCL_PIN = 21;
 
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, I2C_SCL_PIN, I2C_SDA_PIN);
 
-
 constexpr unsigned long READ_INTERVAL_SECONDS = 2;
+constexpr unsigned long NETWORK_STATUS_INTERVAL_MS = 5000; // 5 seconds
 
-void displayValues(const SensorReadings &readings) {
-  // readings has a legal value
+void updateGraphData(const SensorReadings &readings) {
   updateDataBounds(readings.deltaF);
   pushGraphHistory(readings.deltaF);
   webUpdate(readings);
-
   Serial.printf("BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n", readings.bmpF, readings.shtF, readings.deltaF);
-  showGraph(u8g2, readings);
 }
 
 void setup() {
@@ -42,15 +40,42 @@ void setup() {
 }
 
 void loop() {
-  static unsigned long lastUpdate = 0;
+  static unsigned long lastDataUpdate     = 0;
+  static unsigned long lastNetworkRender  = 0;
+  static unsigned long networkStatusUntil = 0;
+  static SensorReadings lastReadings      = {};
   unsigned long now = millis();
 
   buttonTick();
   webHandleClients();
 
-  if (now - lastUpdate >= (READ_INTERVAL_SECONDS * 1000UL)) {
-    SensorReadings const& readings = readSensors();
-    displayValues(readings);
-    lastUpdate = now;
+  if (buttonNetworkStatusPending()) {
+    buttonClearNetworkStatus();
+    networkStatusUntil = now + NETWORK_STATUS_INTERVAL_MS;
+    lastNetworkRender  = 0;
+  }
+
+  // Always update graph data on schedule, regardless of what's on screen.
+  bool freshData = false;
+  if (now - lastDataUpdate >= (READ_INTERVAL_SECONDS * 1000UL)) {
+    lastReadings = readSensors();
+    updateGraphData(lastReadings);
+    lastDataUpdate = now;
+    freshData = true;
+  }
+
+  bool showingNetwork = (now < networkStatusUntil);
+
+  if (showingNetwork) {
+    // Refresh every 250 ms to update the countdown.
+    if (now - lastNetworkRender >= 250UL) {
+      String ssid, ip;
+      webGetApInfo(ssid, ip);
+      unsigned long remainingSecs = (networkStatusUntil - now + 999UL) / 1000UL;
+      showNetworkStatus(u8g2, ssid, ip, remainingSecs);
+      lastNetworkRender = now;
+    }
+  } else if (freshData) {
+    showGraph(u8g2, lastReadings);
   }
 }
