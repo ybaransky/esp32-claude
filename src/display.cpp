@@ -74,7 +74,53 @@ void showGraph(U8G2 &u8g2, const SensorReadings &readings) {
   u8g2.sendBuffer();
 }
 
-void showNetworkStatus(U8G2 &u8g2, const String &ssid, const String &ip, unsigned long remainingSecs) {
+void showSplash(U8G2 &u8g2, unsigned long remainingSecs) {
+  char timeBuf[8];
+  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+
+  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
+  u8g2.setDrawColor(0);
+  u8g2.drawStr(2, 8, "Explanation");
+  u8g2.setDrawColor(1);
+
+  u8g2.drawStr(2, 22, "Testing the precision");
+  u8g2.drawStr(2, 32, "and consistency of");
+  u8g2.drawStr(2, 42, "common, off the shelf");
+  u8g2.drawStr(2, 52, "temperature sensors");
+
+  int tw = u8g2.getStrWidth(timeBuf);
+  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
+
+  u8g2.sendBuffer();
+}
+
+void showMenu(U8G2 &u8g2, unsigned long remainingSecs) {
+  char timeBuf[8];
+  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_5x7_tr);
+
+  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
+  u8g2.setDrawColor(0);
+  u8g2.drawStr(2, 8, "Menu");
+  u8g2.setDrawColor(1);
+
+  u8g2.drawStr(2, 19, "btn1 1x: Normalize");
+  u8g2.drawStr(2, 29, "btn1 2x: Zero start");
+  u8g2.drawStr(2, 39, "btn2 1x: Network Info");
+  u8g2.drawStr(2, 49, "btn2 2x: I2C scan");
+
+  int tw = u8g2.getStrWidth(timeBuf);
+  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
+
+  u8g2.sendBuffer();
+}
+
+void showNetworkInfo(U8G2 &u8g2, const String &ssid, const String &ip, unsigned long remainingSecs) {
   char timeBuf[8];
   snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
 
@@ -84,7 +130,7 @@ void showNetworkStatus(U8G2 &u8g2, const String &ssid, const String &ip, unsigne
   // Title bar
   u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
   u8g2.setDrawColor(0);
-  u8g2.drawStr(2, 8, "Network Status");
+  u8g2.drawStr(2, 8, "Network Info");
   u8g2.setDrawColor(1);
 
   // SSID label + value
@@ -96,6 +142,59 @@ void showNetworkStatus(U8G2 &u8g2, const String &ssid, const String &ip, unsigne
   u8g2.drawStr(2, 54, ip.c_str());
 
   // Countdown bottom-right
+  int tw = u8g2.getStrWidth(timeBuf);
+  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
+
+  u8g2.sendBuffer();
+}
+
+void showI2CScan(U8G2 &u8g2, const String &addresses, unsigned long remainingSecs) {
+  char timeBuf[8];
+  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
+
+  String line = addresses;
+  const int maxTextWidth = DISPLAY_WIDTH - 4;
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+
+  while (line.length() > 0 && u8g2.getStrWidth(line.c_str()) > maxTextWidth) {
+    line.remove(line.length() - 1);
+  }
+  if (line != addresses && line.length() > 3) {
+    line.remove(line.length() - 3);
+    line += "...";
+  }
+
+  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
+  u8g2.setDrawColor(0);
+  u8g2.drawStr(2, 8, "I2C Scan");
+  u8g2.setDrawColor(1);
+
+  u8g2.drawStr(2, 24, "Found:");
+  u8g2.drawStr(2, 38, line.c_str());
+
+  int tw = u8g2.getStrWidth(timeBuf);
+  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
+
+  u8g2.sendBuffer();
+}
+
+void showErrorMessage(U8G2 &u8g2, const String &message, unsigned long remainingSecs) {
+  char timeBuf[8];
+  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+
+  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
+  u8g2.setDrawColor(0);
+  u8g2.drawStr(2, 8, "Sensor Error");
+  u8g2.setDrawColor(1);
+
+  u8g2.drawStr(2, 24, "Read failed:");
+  u8g2.drawStr(2, 38, message.c_str());
+
   int tw = u8g2.getStrWidth(timeBuf);
   u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
 

@@ -21,6 +21,17 @@ static void updateBounds(Bounds &bounds, float data) {
 
 void resetGraphBoundsType1(void) {
   Serial.println("[GRAPH] Resetting graph bounds Type 1");
+  float min = graphHistory[0];
+  float max = graphHistory[0];
+  for (int i=1; i < graphHistoryCount; i++) {
+    min = fminf(min, graphHistory[i]);
+    max = fmaxf(max, graphHistory[i]);
+  }
+  graphBounds = {min, max, true};
+}
+
+void resetGraphBoundsType2(void) {
+  Serial.println("[GRAPH] Resetting graph bounds Type 2");
   float value = graphHistory[graphHistoryCount - 1];
   memset(graphHistory, 0, sizeof(graphHistory));
   graphHistoryCount = 0;
@@ -31,18 +42,6 @@ void resetGraphBoundsType1(void) {
     graphBounds = {1.01f*value, 0.99f*value, true};
   }
 }
-
-void resetGraphBoundsType2(void) {
-  Serial.println("[GRAPH] Resetting graph bounds Type 2");
-  float min = graphHistory[0];
-  float max = graphHistory[0];
-  for (int i=1; i < graphHistoryCount; i++) {
-    min = fminf(min, graphHistory[i]);
-    max = fmaxf(max, graphHistory[i]);
-  }
-  graphBounds = {min, max, true};
-}
-
 void updateDataBounds(float data) {
   updateBounds(totalBounds, data);
   updateBounds(graphBounds, data);

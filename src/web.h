@@ -11,4 +11,4 @@ struct SensorReadings {
 void webBegin(const char *ssid, const char *password);
 void webUpdate(const SensorReadings &readings);
 void webHandleClients();
-void webGetApInfo(String &ssid, String &ip);
+void networkGetInfo(String &ssid, String &ip);
