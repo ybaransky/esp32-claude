@@ -10,3 +10,5 @@ bool buttonNetworkInfoPending();
 void buttonClearNetworkInfoPending();
 bool buttonI2cScanPending();
 void buttonClearI2cScanPending();
+bool buttonRtcStatusPending();
+void buttonClearRtcStatusPending();

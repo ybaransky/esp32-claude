@@ -1,5 +1,10 @@
 #pragma once
 #include <Arduino.h>
 
+struct I2CScanResult {
+	const uint8_t *addresses;
+	size_t count;
+};
+
 void scanI2C();
-const String& i2cGetLastScanAddresses();
+I2CScanResult i2cGetLastScanResult();

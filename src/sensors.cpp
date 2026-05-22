@@ -1,5 +1,6 @@
 #include "sensors.h"
 #include "i2c_scanner.h"
+#include "hardware.h"
 #include <Wire.h>
 #include <Adafruit_BMP280.h>
 #include <Adafruit_SHT31.h>
@@ -10,8 +11,8 @@ static SensorReadings currentReadings = {0.0f, 0.0f, 0.0f, 0};
 
 void sensorsInit(uint8_t sdaPin, uint8_t sclPin) {
   // Wire is already initialized by u8g2.begin()
-  bme.begin(0x76);
-  sht31.begin(0x44);
+  bme.begin(Hardware::I2CAddress::BMP280);
+  sht31.begin(Hardware::I2CAddress::SHT31);
 }
 
 const SensorReadings& readSensors(bool force) {

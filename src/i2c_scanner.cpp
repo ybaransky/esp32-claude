@@ -1,32 +1,28 @@
 #include "i2c_scanner.h"
 #include <Wire.h>
 
-static String lastScanAddresses = "None";
+static uint8_t lastScanAddressArray[126];
+static size_t lastScanAddressCount = 0;
 
 void scanI2C() {
   Serial.println("Scanning I2C bus...");
-  int found = 0;
-  lastScanAddresses = "";
+  size_t found = 0;
+  lastScanAddressCount = 0;
 
   for (uint8_t addr = 1; addr < 127; addr++) {
     Wire.beginTransmission(addr);
     if (Wire.endTransmission() == 0) {
       Serial.printf("  Found device at 0x%02X\n", addr);
-      if (found > 0) {
-        lastScanAddresses += " ";
+      if (found < (sizeof(lastScanAddressArray) / sizeof(lastScanAddressArray[0]))) {
+        lastScanAddressArray[found] = addr;
       }
-      char addrBuf[8];
-      snprintf(addrBuf, sizeof(addrBuf), "0x%02X", addr);
-      lastScanAddresses += addrBuf;
       found++;
     }
   }
-  if (found == 0) {
-    lastScanAddresses = "None";
-  }
-  Serial.printf("Scan complete. %d device(s) found.\n\n", found);
+  lastScanAddressCount = found;
+  Serial.printf("Scan complete. %u device(s) found.\n\n", static_cast<unsigned>(found));
 }
 
-const String& i2cGetLastScanAddresses() {
-  return lastScanAddresses;
+I2CScanResult i2cGetLastScanResult() {
+  return {lastScanAddressArray, lastScanAddressCount};
 }

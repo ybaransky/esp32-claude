@@ -1,22 +1,21 @@
 #include "button.h"
 #include "graph.h"
 #include "i2c_scanner.h"
+#include "hardware.h"
 #include <OneButton.h>  // mathertel/OneButton
 #include <Arduino.h>
 
-constexpr uint8_t BUTTON_PIN = 23;
-constexpr uint8_t BUTTON_PIN_2 = 19;
-constexpr uint8_t LED_PIN    = 2;   // ESP32 dev board built-in LED
-
 // Pin 23, active-low, internal pull-up enabled.
-static OneButton btn1(BUTTON_PIN, true, true);
+static OneButton btn1(Hardware::Pins::BUTTON_1, true, true);
+
 // Pin 19, active-low, internal pull-up enabled.
-static OneButton btn2(BUTTON_PIN_2, true, true);
+static OneButton btn2(Hardware::Pins::BUTTON_2, true, true);
 
 static volatile bool splashPending = false;
 static volatile bool menuPending = false;
 static volatile bool networkInfoPending = false;
 static volatile bool i2cScanPending = false;
+static volatile bool rtcStatusPending = false;
 
 bool buttonSplashPending() {
     return splashPending;
@@ -50,10 +49,18 @@ void buttonClearI2cScanPending() {
     i2cScanPending = false;
 }
 
+bool buttonRtcStatusPending() {
+    return rtcStatusPending;
+}
+
+void buttonClearRtcStatusPending() {
+    rtcStatusPending = false;
+}
+
 static void blink(unsigned int ms) {
-    digitalWrite(LED_PIN, HIGH);
+    digitalWrite(Hardware::Pins::INTERNAL_LED, HIGH);
     delay(ms);
-    digitalWrite(LED_PIN, LOW);
+    digitalWrite(Hardware::Pins::INTERNAL_LED, LOW);
 }
 
 static void onBtn1Click() {
@@ -71,7 +78,6 @@ static void onBtn1DoubleClick() {
 static void onBtn1MultiClick() {
     Serial.println("[BTN1] Triple click detected");
     blink(200);
-    networkInfoPending = true;
 }
 
 static void onBtn1LongPressStart() {
@@ -88,7 +94,6 @@ static void onBtn2Click() {
 static void onBtn2DoubleClick() {
     Serial.println("[BTN2] Double click detected");
     blink(200);
-    scanI2C();
     i2cScanPending = true;
     // TODO: define action for button 2 double-click
 }
@@ -96,17 +101,16 @@ static void onBtn2DoubleClick() {
 static void onBtn2MultiClick() {
     Serial.println("[BTN2] Triple click detected");
     blink(200);
-    // TODO: define action for button 2 triple-click
 }
 
 static void onBtn2LongPressStart() {
     Serial.println("[BTN2] Long press detected");
     blink(200);
-    splashPending = true;
+    rtcStatusPending = true;
 }
 
 void buttonSetup() {
-    pinMode(LED_PIN, OUTPUT);
+    pinMode(Hardware::Pins::INTERNAL_LED, OUTPUT);
 
     btn1.attachClick(onBtn1Click);
     btn1.attachDoubleClick(onBtn1DoubleClick);

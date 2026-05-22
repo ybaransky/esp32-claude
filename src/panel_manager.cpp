@@ -7,11 +7,12 @@ PanelManager::PanelManager()
     lastRender(0),
     panelData(),
     queuedPanelCount(0),
-    splashMs(5000),
+    splashMs(4000),
     menuMs(5000),
     networkInfoMs(5000),
-    i2cScanMs(3000),
-    errorMessageMs(4000) {}
+    i2cScanMs(5000),
+    rtcStatusMs(5000),
+    errorMessageMs(5000) {}
 
 void PanelManager::activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now) {
   prevPanel = currentPanel;
@@ -141,7 +142,15 @@ void PanelManager::render(U8G2 &u8g2, unsigned long now) {
     case Panel::I2C_SCAN:
       if (panelChanged || now - lastRender >= 250UL) {
         unsigned long remainingSecs = (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
-        showI2CScan(u8g2, panelData.i2cAddresses, remainingSecs);
+        showI2CScan(u8g2, remainingSecs);
+        lastRender = now;
+      }
+      break;
+
+    case Panel::RTC_STATUS:
+      if (panelChanged || now - lastRender >= 250UL) {
+        unsigned long remainingSecs = (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
+        showRtcStatus(u8g2, remainingSecs);
         lastRender = now;
       }
       break;
@@ -160,6 +169,7 @@ int PanelManager::panelPriority(Panel panel) {
   switch (panel) {
     case Panel::ERROR_MESSAGE:  return 20;
     case Panel::I2C_SCAN:       return 15;
+    case Panel::RTC_STATUS:     return 12;
     case Panel::NETWORK_INFO:   return 10;
     case Panel::MENU:           return 5;
     case Panel::SPLASH:         return 1;

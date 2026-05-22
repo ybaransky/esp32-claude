@@ -10,11 +10,10 @@
 #include "sensors.h"
 #include "i2c_scanner.h"
 #include "panel_manager.h"
+#include "rtc_ds3231.h"
+#include "hardware.h"
 
-constexpr uint8_t I2C_SDA_PIN = 22;
-constexpr uint8_t I2C_SCL_PIN = 21;
-
-U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, I2C_SCL_PIN, I2C_SDA_PIN);
+U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, Hardware::Pins::I2C_SCL, Hardware::Pins::I2C_SDA);
 
 constexpr unsigned long READ_INTERVAL_SECONDS = 2;
 
@@ -31,7 +30,12 @@ void setup() {
   // u8g2.begin() initializes Wire using the pins passed in the constructor.
   u8g2.begin();
 
-  sensorsInit(I2C_SDA_PIN, I2C_SCL_PIN);
+  sensorsInit(Hardware::Pins::I2C_SDA, Hardware::Pins::I2C_SCL);
+
+  if (!rtcBegin()) {
+    RtcStatus status = rtcGetStatus();
+    Serial.printf("[RTC] Init failed: %s\n", status.error.c_str());
+  }
 
   ApConfig cfg = loadApConfig();
   webBegin(cfg.ssid.c_str(), cfg.password.c_str());
@@ -49,11 +53,22 @@ void loop() {
   unsigned long now = millis();
 
   if (!splashShown) {
+    // Show splash, then network, I2C scan, and RTC panels in sequence
     panelMgr.setPanel(Panel::SPLASH, panelMgr.splashMs, PanelPayload(), now);
+/*
+    PanelPayload networkData;
+    networkGetInfo(networkData.networkSsid, networkData.networkIp);
+    panelMgr.enqueuePanelBack(Panel::NETWORK_INFO, panelMgr.networkInfoMs, networkData);
+    scanI2C();
+    panelMgr.enqueuePanelBack(Panel::I2C_SCAN, panelMgr.i2cScanMs, PanelPayload());
+    panelMgr.enqueuePanelBack(Panel::RTC_STATUS, panelMgr.rtcStatusMs, PanelPayload());
+*/
+
     splashShown = true;
   }
 
   buttonTick();
+  rtcHandle();
   webHandleClients();
 
   if (buttonSplashPending()) {
@@ -67,10 +82,14 @@ void loop() {
   }
 
   if (buttonI2cScanPending()) {
-    PanelPayload panelData;
-    panelData.i2cAddresses = i2cGetLastScanAddresses();
     buttonClearI2cScanPending();
-    panelMgr.setPanel(Panel::I2C_SCAN, panelMgr.i2cScanMs, panelData, now);
+    scanI2C();
+    panelMgr.setPanel(Panel::I2C_SCAN, panelMgr.i2cScanMs, PanelPayload(), now);
+  }
+
+  if (buttonRtcStatusPending()) {
+    buttonClearRtcStatusPending();
+    panelMgr.setPanel(Panel::RTC_STATUS, panelMgr.rtcStatusMs, PanelPayload(), now);
   }
 
   if (buttonNetworkInfoPending()) {

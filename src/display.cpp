@@ -1,5 +1,7 @@
 #include "display.h"
 #include "graph.h"
+#include "i2c_scanner.h"
+#include "rtc_ds3231.h"
 #include <math.h>
 
 static Bounds getPaddedBounds(const Bounds &bounds, float data) {
@@ -109,10 +111,11 @@ void showMenu(U8G2 &u8g2, unsigned long remainingSecs) {
   u8g2.drawStr(2, 8, "Menu");
   u8g2.setDrawColor(1);
 
-  u8g2.drawStr(2, 19, "btn1 1x: Normalize");
-  u8g2.drawStr(2, 29, "btn1 2x: Zero start");
+  u8g2.drawStr(2, 19, "btn1 1x: rescale Y-axis");
+  u8g2.drawStr(2, 29, "btn1 2x: start from 0");
   u8g2.drawStr(2, 39, "btn2 1x: Network Info");
   u8g2.drawStr(2, 49, "btn2 2x: I2C scan");
+  u8g2.drawStr(2, 59, "btn2 --: RTC status");
 
   int tw = u8g2.getStrWidth(timeBuf);
   u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
@@ -148,22 +151,75 @@ void showNetworkInfo(U8G2 &u8g2, const String &ssid, const String &ip, unsigned 
   u8g2.sendBuffer();
 }
 
-void showI2CScan(U8G2 &u8g2, const String &addresses, unsigned long remainingSecs) {
+void showI2CScan(U8G2 &u8g2, unsigned long remainingSecs) {
   char timeBuf[8];
   snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
 
-  String line = addresses;
+  String line1 = "";
+  String line2 = "";
   const int maxTextWidth = DISPLAY_WIDTH - 4;
+
+  I2CScanResult scanResult = i2cGetLastScanResult();
+  int foundCount = static_cast<int>(scanResult.count);
+
+  String foundLine1 = "Found: " + String(foundCount) + " device(s)";
+  String foundLine2 = "";
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tr);
 
-  while (line.length() > 0 && u8g2.getStrWidth(line.c_str()) > maxTextWidth) {
-    line.remove(line.length() - 1);
+  if (u8g2.getStrWidth(foundLine1.c_str()) > maxTextWidth) {
+    int split = foundLine1.length() - 1;
+    while (split > 0) {
+      if (foundLine1.charAt(split) == ' ') {
+        String candidate = foundLine1.substring(0, split);
+        if (u8g2.getStrWidth(candidate.c_str()) <= maxTextWidth) {
+          foundLine2 = foundLine1.substring(split + 1);
+          foundLine1 = candidate;
+          break;
+        }
+      }
+      split--;
+    }
   }
-  if (line != addresses && line.length() > 3) {
-    line.remove(line.length() - 3);
-    line += "...";
+
+  auto appendToken = [&](String &target, const String &token) {
+    String candidate = target.length() == 0 ? token : (target + " " + token);
+    if (u8g2.getStrWidth(candidate.c_str()) <= maxTextWidth) {
+      target = candidate;
+      return true;
+    }
+    return false;
+  };
+
+  if (scanResult.count == 0) {
+    line1 = "None";
+  } else {
+    bool hasOverflow = false;
+    for (size_t i = 0; i < scanResult.count; ++i) {
+      char addrBuf[8];
+      snprintf(addrBuf, sizeof(addrBuf), "0x%02X", scanResult.addresses[i]);
+      String token(addrBuf);
+
+      if (!appendToken(line1, token)) {
+        if (!appendToken(line2, token)) {
+          hasOverflow = true;
+        }
+      }
+    }
+
+    if (hasOverflow) {
+      const String suffix = " ...";
+      while (line2.length() > 0 && u8g2.getStrWidth((line2 + suffix).c_str()) > maxTextWidth) {
+        line2.remove(line2.length() - 1);
+      }
+      line2.trim();
+      line2 += suffix;
+    }
+
+    if (line1.length() == 0) {
+      line1 = "None";
+    }
   }
 
   u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
@@ -171,8 +227,54 @@ void showI2CScan(U8G2 &u8g2, const String &addresses, unsigned long remainingSec
   u8g2.drawStr(2, 8, "I2C Scan");
   u8g2.setDrawColor(1);
 
-  u8g2.drawStr(2, 24, "Found:");
-  u8g2.drawStr(2, 38, line.c_str());
+  u8g2.drawStr(2, 24, foundLine1.c_str());
+  int addressY = 38;
+  if (foundLine2.length() > 0) {
+    u8g2.drawStr(2, 34, foundLine2.c_str());
+    addressY = 48;
+  }
+  u8g2.drawStr(2, addressY, line1.c_str());
+  if (line2.length() > 0) {
+    u8g2.drawStr(2, addressY + 10, line2.c_str());
+  }
+
+  int tw = u8g2.getStrWidth(timeBuf);
+  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
+
+  u8g2.sendBuffer();
+}
+
+void showRtcStatus(U8G2 &u8g2, unsigned long remainingSecs) {
+  char timeBuf[8];
+  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
+
+  RtcStatus status = rtcGetStatus();
+  String rtcNow = rtcGetCurrentTimeString();
+
+  const char *presentText = status.present ? "Yes" : "No";
+  const char *powerText   = status.powerLost ? "Yes" : "No";
+  const char *batteryText = status.lowBattery ? "Low" : "OK";
+  const char *sqwText     = status.sqwConfigured ? "Yes" : "No";
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+
+  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
+  u8g2.setDrawColor(0);
+  u8g2.drawStr(2, 8, "RTC Status");
+  u8g2.setDrawColor(1);
+
+  u8g2.drawStr(2, 20, rtcNow.c_str());
+  u8g2.drawStr(2, 29, (String("Present:") + presentText).c_str());
+  u8g2.drawStr(2, 38, (String("LostPwr:") + powerText).c_str());
+  u8g2.drawStr(2, 47, (String("Battery:") + batteryText).c_str());
+  u8g2.drawStr(2, 56, (String("SQW 1Hz:") + sqwText).c_str());
+
+  String nowLine = "T:" + rtcNow;
+  if (u8g2.getStrWidth(nowLine.c_str()) > DISPLAY_WIDTH - 4) {
+    nowLine = rtcNow.substring(rtcNow.length() - 8);
+  }
+  //u8g2.drawStr(2, 56, nowLine.c_str());
 
   int tw = u8g2.getStrWidth(timeBuf);
   u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);

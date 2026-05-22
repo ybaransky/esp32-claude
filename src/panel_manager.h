@@ -6,13 +6,11 @@
 struct PanelPayload {
   String networkSsid;
   String networkIp;
-  String i2cAddresses;
   String errorMessage;
 
   bool operator==(const PanelPayload &other) const {
     return networkSsid == other.networkSsid &&
            networkIp == other.networkIp &&
-           i2cAddresses == other.i2cAddresses &&
            errorMessage == other.errorMessage;
   }
 };
@@ -37,9 +35,11 @@ struct PanelManager {
   unsigned long menuMs;
   unsigned long networkInfoMs;
   unsigned long i2cScanMs;
+  unsigned long rtcStatusMs;
   unsigned long errorMessageMs;
 
   PanelManager();
+
 
   // Set/update panel based on priority; returns true if panel changed
   bool setPanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now);
@@ -50,10 +50,12 @@ struct PanelManager {
   // Render current panel; respects change flags and refresh intervals
   void render(U8G2 &u8g2, unsigned long now);
 
- private:
-  void activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now);
+  // Allow queueing panels from outside
   bool enqueuePanelBack(Panel panel, unsigned long durationMs, const PanelPayload &data);
   bool enqueuePanelFront(Panel panel, unsigned long durationMs, const PanelPayload &data);
+
+ private:
+  void activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now);
   bool dequeuePanel(PanelRequest &request);
   static int panelPriority(Panel panel);
 };
