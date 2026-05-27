@@ -16,6 +16,8 @@ static volatile bool menuPending = false;
 static volatile bool networkInfoPending = false;
 static volatile bool i2cScanPending = false;
 static volatile bool rtcStatusPending = false;
+static volatile bool histogramTogglePending = false;
+static volatile bool graphResetStyle1Pending = false;
 
 bool buttonSplashPending() {
     return splashPending;
@@ -57,6 +59,22 @@ void buttonClearRtcStatusPending() {
     rtcStatusPending = false;
 }
 
+bool buttonHistogramTogglePending() {
+    return histogramTogglePending;
+}
+
+void buttonClearHistogramTogglePending() {
+    histogramTogglePending = false;
+}
+
+bool buttonGraphResetStyle1Pending() {
+    return graphResetStyle1Pending;
+}
+
+void buttonClearGraphResetStyle1Pending() {
+    graphResetStyle1Pending = false;
+}
+
 static void blink(unsigned int ms) {
     digitalWrite(Hardware::Pins::INTERNAL_LED, HIGH);
     delay(ms);
@@ -66,13 +84,13 @@ static void blink(unsigned int ms) {
 static void onBtn1Click() {
     Serial.println("[BTN1] Single press detected");
     blink(200);
-    resetGraphBounds(1);
+    histogramTogglePending = true;
 }
 
 static void onBtn1DoubleClick() {
     Serial.println("[BTN1] Double click detected");
     blink(200);
-    resetGraphBounds(2);
+    graphResetStyle1Pending = true;
 }
 
 static void onBtn1MultiClick() {

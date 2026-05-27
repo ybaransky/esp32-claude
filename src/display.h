@@ -4,6 +4,7 @@
 
 enum class Panel {
   GRAPH,
+  HISTOGRAM,
   SPLASH,
   MENU,
   NETWORK_INFO,
@@ -26,6 +27,7 @@ inline Panel nextPanel(Panel panel) {
 }
 
 void showGraph(U8G2 &u8g2, const SensorReadings &readings);
+void showHistogram(U8G2 &u8g2, const SensorReadings &readings);
 void showSplash(U8G2 &u8g2, unsigned long remainingSecs);
 void showMenu(U8G2 &u8g2, unsigned long remainingSecs);
 void showNetworkInfo(U8G2 &u8g2, const String &ssid, const String &ip, unsigned long remainingSecs);

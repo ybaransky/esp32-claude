@@ -76,6 +76,156 @@ void showGraph(U8G2 &u8g2, const SensorReadings &readings) {
   u8g2.sendBuffer();
 }
 
+void showHistogram(U8G2 &u8g2, const SensorReadings &readings) {
+  (void)readings;
+
+  const int *bins = graphGetHistogram();
+  const int binCount = graphGetHistogramBinCount();
+  const uint32_t sampleCount = graphGetHistogramSampleCount();
+  const double meanScaled = graphGetHistogramMeanScaled();
+  const double halfRangeScaled = graphGetHistogramHalfRangeScaled();
+
+  const float leftValue = static_cast<float>((meanScaled - halfRangeScaled) * HISTOGRAM_BIN_SIZE_F);
+  const float rightValue = static_cast<float>((meanScaled + halfRangeScaled) * HISTOGRAM_BIN_SIZE_F);
+  const float meanValue = static_cast<float>(meanScaled * HISTOGRAM_BIN_SIZE_F);
+
+  char yTopBuf[10], yMidBuf[10];
+  char xMinBuf[10], xMidBuf[10], xMaxBuf[10];
+  char sampleBuf[16];
+  snprintf(xMinBuf, sizeof(xMinBuf), "%+.2f", leftValue);
+  snprintf(xMidBuf, sizeof(xMidBuf), "%+.2f", meanValue);
+  snprintf(xMaxBuf, sizeof(xMaxBuf), "%+.2f", rightValue);
+  snprintf(sampleBuf, sizeof(sampleBuf), "N=%lu", static_cast<unsigned long>(sampleCount));
+
+  const int yLabelGap = 2;
+  const int sampleWidth = u8g2.getStrWidth(sampleBuf);
+  const int sampleX = DISPLAY_WIDTH - sampleWidth - 1;
+  const int sampleY = GRAPH_TOP + 6;
+
+  const int yAxisMax = graphGetHistogramLatchedMaxFrequency();
+  const int yAxisMid = (yAxisMax > 1) ? ((yAxisMax + 1) / 2) : 0;
+  snprintf(yTopBuf, sizeof(yTopBuf), "%d", yAxisMax);
+  snprintf(yMidBuf, sizeof(yMidBuf), "%d", yAxisMid);
+  const int yZeroWidth = u8g2.getStrWidth("0");
+  int yLabelWidth = u8g2.getStrWidth(yTopBuf);
+  int yMidWidth = u8g2.getStrWidth(yMidBuf);
+  if (yMidWidth > yLabelWidth) {
+    yLabelWidth = yMidWidth;
+  }
+  if (yLabelWidth < yZeroWidth) {
+    yLabelWidth = yZeroWidth;
+  }
+
+  const int axisLeftX = yLabelWidth + yLabelGap;
+  const int plotLeftX = axisLeftX + 1;
+  int plotWidth = DISPLAY_WIDTH - plotLeftX;
+  if (plotWidth > GRAPH_WIDTH) {
+    plotWidth = GRAPH_WIDTH;
+  }
+  if (plotWidth < 1) {
+    plotWidth = 1;
+  }
+  const int axisRightX = plotLeftX + plotWidth - 1;
+
+  int bucketCounts[GRAPH_WIDTH] = {0};
+  for (int col = 0; col < plotWidth; ++col) {
+    const int start = (col * binCount) / plotWidth;
+    const int endExclusive = ((col + 1) * binCount) / plotWidth;
+    int bucketCount = 0;
+    for (int i = start; i < endExclusive; ++i) {
+      bucketCount += bins[i];
+    }
+    bucketCounts[col] = bucketCount;
+  }
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_5x7_tr);
+
+  u8g2.drawVLine(axisLeftX, GRAPH_TOP, GRAPH_HEIGHT);
+  u8g2.drawHLine(axisLeftX, GRAPH_BOTTOM, axisRightX - axisLeftX + 1);
+  u8g2.drawStr(0, GRAPH_TOP + 7, yTopBuf);
+  if (yAxisMax > 1) {
+    const int yMid = GRAPH_BOTTOM - static_cast<int>((static_cast<float>(yAxisMid) / static_cast<float>(yAxisMax)) * (GRAPH_HEIGHT - 1) + 0.5f);
+    int yMidLabelY = yMid + 3;
+    if (yMidLabelY < GRAPH_TOP + 7) {
+      yMidLabelY = GRAPH_TOP + 7;
+    }
+    if (yMidLabelY > GRAPH_BOTTOM) {
+      yMidLabelY = GRAPH_BOTTOM;
+    }
+    u8g2.drawHLine(axisLeftX - 1, yMid, 2);
+    u8g2.drawStr(0, yMidLabelY, yMidBuf);
+  }
+  u8g2.drawStr(0, GRAPH_BOTTOM, "0");
+
+  // Keep sample count visible in the upper-right corner.
+  u8g2.setDrawColor(0);
+  u8g2.drawBox(sampleX - 1, GRAPH_TOP, sampleWidth + 2, 8);
+  u8g2.setDrawColor(1);
+  u8g2.drawStr(sampleX, sampleY, sampleBuf);
+
+  const int axisCenterX = axisLeftX + ((axisRightX - axisLeftX) / 2);
+  const int xLabelY = GRAPH_BOTTOM + 10;
+
+  u8g2.drawVLine(axisLeftX, GRAPH_BOTTOM, 2);
+  u8g2.drawVLine(axisCenterX, GRAPH_BOTTOM, 2);
+  u8g2.drawVLine(axisRightX, GRAPH_BOTTOM, 2);
+
+  int xMinLabelX = axisLeftX - (u8g2.getStrWidth(xMinBuf) / 2);
+  int xMidLabelX = axisCenterX - (u8g2.getStrWidth(xMidBuf) / 2);
+  int xMaxLabelX = axisRightX - (u8g2.getStrWidth(xMaxBuf) / 2);
+
+  if (xMinLabelX < 0) {
+    xMinLabelX = 0;
+  }
+  if (xMidLabelX < 0) {
+    xMidLabelX = 0;
+  }
+  if (xMaxLabelX < 0) {
+    xMaxLabelX = 0;
+  }
+  if (xMinLabelX > DISPLAY_WIDTH - u8g2.getStrWidth(xMinBuf)) {
+    xMinLabelX = DISPLAY_WIDTH - u8g2.getStrWidth(xMinBuf);
+  }
+  if (xMidLabelX > DISPLAY_WIDTH - u8g2.getStrWidth(xMidBuf)) {
+    xMidLabelX = DISPLAY_WIDTH - u8g2.getStrWidth(xMidBuf);
+  }
+  if (xMaxLabelX > DISPLAY_WIDTH - u8g2.getStrWidth(xMaxBuf)) {
+    xMaxLabelX = DISPLAY_WIDTH - u8g2.getStrWidth(xMaxBuf);
+  }
+
+  u8g2.drawStr(xMinLabelX, xLabelY, xMinBuf);
+  u8g2.drawStr(xMidLabelX, xLabelY, xMidBuf);
+  u8g2.drawStr(xMaxLabelX, xLabelY, xMaxBuf);
+
+  if (yAxisMax > 0) {
+    for (int col = 0; col < plotWidth; ++col) {
+      const int bucketCount = bucketCounts[col];
+      if (bucketCount <= 0) {
+        continue;
+      }
+
+      int barHeight = static_cast<int>((static_cast<float>(bucketCount) / static_cast<float>(yAxisMax)) * (GRAPH_HEIGHT - 1) + 0.5f);
+      if (barHeight < 1) {
+        barHeight = 1;
+      }
+      if (barHeight > GRAPH_HEIGHT - 1) {
+        barHeight = GRAPH_HEIGHT - 1;
+      }
+
+      const int x = plotLeftX + col;
+      const int y = GRAPH_BOTTOM - barHeight;
+      u8g2.drawVLine(x, y, barHeight);
+    }
+
+    const int centerX = plotLeftX + ((HISTOGRAM_CENTER_INDEX * (plotWidth - 1)) / (binCount - 1));
+    for (int y = GRAPH_TOP; y <= GRAPH_BOTTOM; y += 2) {
+      u8g2.drawPixel(centerX, y);
+    }
+  }
+  u8g2.sendBuffer();
+}
+
 void showSplash(U8G2 &u8g2, unsigned long remainingSecs) {
   char timeBuf[8];
   snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
@@ -111,8 +261,8 @@ void showMenu(U8G2 &u8g2, unsigned long remainingSecs) {
   u8g2.drawStr(2, 8, "Menu");
   u8g2.setDrawColor(1);
 
-  u8g2.drawStr(2, 19, "btn1 1x: rescale Y-axis");
-  u8g2.drawStr(2, 29, "btn1 2x: start from 0");
+  u8g2.drawStr(2, 19, "btn1 1x: Graph/Histogram");
+  u8g2.drawStr(2, 29, "btn1 2x: full reset");
   u8g2.drawStr(2, 39, "btn2 1x: Network Info");
   u8g2.drawStr(2, 49, "btn2 2x: I2C scan");
   u8g2.drawStr(2, 59, "btn2 --: RTC status");

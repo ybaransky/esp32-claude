@@ -12,3 +12,7 @@ bool buttonI2cScanPending();
 void buttonClearI2cScanPending();
 bool buttonRtcStatusPending();
 void buttonClearRtcStatusPending();
+bool buttonHistogramTogglePending();
+void buttonClearHistogramTogglePending();
+bool buttonGraphResetStyle1Pending();
+void buttonClearGraphResetStyle1Pending();

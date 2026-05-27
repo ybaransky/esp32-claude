@@ -17,7 +17,7 @@ void sensorsInit(uint8_t sdaPin, uint8_t sclPin) {
 
 const SensorReadings& readSensors(bool force) {
   unsigned long now = millis();
-  if (force || now - currentReadings.readTime >= 1000UL) {
+  if (force || now - currentReadings.readTime >= 500) {
     currentReadings.bmpF = bme.readTemperature()   * 9.0f / 5.0f + 32.0f;
     currentReadings.shtF = sht31.readTemperature() * 9.0f / 5.0f + 32.0f;
     currentReadings.deltaF = currentReadings.bmpF - currentReadings.shtF;

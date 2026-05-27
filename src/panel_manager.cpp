@@ -71,7 +71,7 @@ bool PanelManager::setPanel(Panel panel, unsigned long durationMs, const PanelPa
     return false;
   }
 
-  if (currentPanel == Panel::GRAPH) {
+  if (currentPanel == Panel::GRAPH || currentPanel == Panel::HISTOGRAM) {
     activatePanel(panel, durationMs, data, now);
     return true;
   }
@@ -111,6 +111,7 @@ void PanelManager::render(U8G2 &u8g2, unsigned long now) {
 
   switch (currentPanel) {
     case Panel::GRAPH:
+    case Panel::HISTOGRAM:
       // Graph rendering is handled externally; just mark as rendered
       lastRender = now;
       break;
@@ -173,6 +174,7 @@ int PanelManager::panelPriority(Panel panel) {
     case Panel::NETWORK_INFO:   return 10;
     case Panel::MENU:           return 5;
     case Panel::SPLASH:         return 1;
+    case Panel::HISTOGRAM:      return 0;
     case Panel::GRAPH:          return 0;
     default:                    return 0;
   }

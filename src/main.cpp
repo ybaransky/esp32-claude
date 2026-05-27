@@ -15,7 +15,7 @@
 
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, Hardware::Pins::I2C_SCL, Hardware::Pins::I2C_SDA);
 
-constexpr unsigned long READ_INTERVAL_SECONDS = 2;
+constexpr unsigned long READ_INTERVAL_SECONDS = 1;
 
 void updateGraphData(const SensorReadings &readings) {
   updateDataBounds(readings.deltaF);
@@ -46,6 +46,7 @@ void setup() {
 
 void loop() {
   static PanelManager  panelMgr;
+  static bool histogramViewEnabled = false;
   static bool splashShown = false;
   static unsigned long lastSensorReading  = 0;
   static SensorReadings lastReadings      = {};
@@ -99,6 +100,21 @@ void loop() {
     panelMgr.setPanel(Panel::NETWORK_INFO, panelMgr.networkInfoMs, panelData, now);
   }
 
+  bool forceBaseRedraw = false;
+  if (buttonHistogramTogglePending()) {
+    buttonClearHistogramTogglePending();
+    histogramViewEnabled = !histogramViewEnabled;
+    Serial.printf("[BTN1] Base view: %s\n", histogramViewEnabled ? "Histogram" : "Graph");
+    forceBaseRedraw = true;
+  }
+
+  if (buttonGraphResetStyle1Pending()) {
+    buttonClearGraphResetStyle1Pending();
+    resetGraphAndHistogram();
+    Serial.println("[BTN1] Full reset: graph bounds/history + histogram");
+    forceBaseRedraw = true;
+  }
+
   // Always update graph data on schedule, regardless of what's on screen.
   bool freshData = false;
   if (now - lastSensorReading >= (READ_INTERVAL_SECONDS * 1000UL)) {
@@ -132,8 +148,12 @@ void loop() {
 
   // Render graph or delegate to panel manager
   if (panelMgr.currentPanel == Panel::GRAPH) {
-    if (panelMgr.currentPanel != panelMgr.prevPanel || freshData) {
-      showGraph(u8g2, lastReadings);
+    if (panelMgr.currentPanel != panelMgr.prevPanel || freshData || forceBaseRedraw) {
+      if (histogramViewEnabled) {
+        showHistogram(u8g2, lastReadings);
+      } else {
+        showGraph(u8g2, lastReadings);
+      }
     }
   } else {
     panelMgr.render(u8g2, now);
