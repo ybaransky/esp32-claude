@@ -24,6 +24,7 @@ struct PanelRequest {
 struct PanelManager {
   Panel currentPanel;
   Panel prevPanel;
+  Panel primaryPanel;
   unsigned long panelUntil;
   unsigned long lastRender;
   PanelPayload panelData;

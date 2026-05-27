@@ -11,7 +11,7 @@ struct RtcStatus {
 };
 
 bool rtcBegin();
-void rtcHandle();
+void rtcTick();
 RtcStatus rtcGetStatus();
 String rtcGetCurrentTimeString();
 

@@ -17,7 +17,7 @@ static volatile bool networkInfoPending = false;
 static volatile bool i2cScanPending = false;
 static volatile bool rtcStatusPending = false;
 static volatile bool histogramTogglePending = false;
-static volatile bool graphResetStyle1Pending = false;
+static volatile bool panelDataResetPending = false;
 
 bool buttonSplashPending() {
     return splashPending;
@@ -67,12 +67,12 @@ void buttonClearHistogramTogglePending() {
     histogramTogglePending = false;
 }
 
-bool buttonGraphResetStyle1Pending() {
-    return graphResetStyle1Pending;
+bool buttonPanelDataResetPending() {
+    return panelDataResetPending;
 }
 
-void buttonClearGraphResetStyle1Pending() {
-    graphResetStyle1Pending = false;
+void buttonClearPanelDataResetPending() {
+    panelDataResetPending = false;
 }
 
 static void blink(unsigned int ms) {
@@ -90,7 +90,7 @@ static void onBtn1Click() {
 static void onBtn1DoubleClick() {
     Serial.println("[BTN1] Double click detected");
     blink(200);
-    graphResetStyle1Pending = true;
+    panelDataResetPending = true;
 }
 
 static void onBtn1MultiClick() {
@@ -127,7 +127,7 @@ static void onBtn2LongPressStart() {
     rtcStatusPending = true;
 }
 
-void buttonSetup() {
+void buttonBegin() {
     pinMode(Hardware::Pins::INTERNAL_LED, OUTPUT);
 
     btn1.attachClick(onBtn1Click);

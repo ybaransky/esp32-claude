@@ -4,7 +4,7 @@
     {
       "label": "PlatformIO: Upload and Monitor",
       "type": "shell",
-      "command": "C:/Users/ybara/.platformio/penv/Scripts/platformio.exe",
+      "command": "C:/Users/ybaransky/.platformio/penv/Scripts/platformio.exe",
       "args": [
         "run",
         "--target",

@@ -2,6 +2,9 @@
 #include <U8g2lib.h>
 #include "web.h"
 
+void displayBegin();
+U8G2 &displayDevice();
+
 enum class Panel {
   GRAPH,
   HISTOGRAM,

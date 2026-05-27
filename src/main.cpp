@@ -1,161 +1,184 @@
 #include <Arduino.h>
 #include <math.h>
-#include <Wire.h>
-#include <U8g2lib.h>
 #include "graph.h"
 #include "display.h"
 #include "config.h"
 #include "web.h"
 #include "button.h"
 #include "sensors.h"
+#include "histogram.h"
 #include "i2c_scanner.h"
 #include "panel_manager.h"
 #include "rtc_ds3231.h"
 #include "hardware.h"
 
-U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, Hardware::Pins::I2C_SCL, Hardware::Pins::I2C_SDA);
-
 constexpr unsigned long READ_INTERVAL_SECONDS = 1;
 
-void updateGraphData(const SensorReadings &readings) {
-  updateDataBounds(readings.deltaF);
-  pushGraphHistory(readings.deltaF);
+// ---------------------------------------------------------------------------
+// Application state
+// ---------------------------------------------------------------------------
+
+struct AppState {
+  PanelManager      panelMgr;
+  SensorReadings    lastReadings        = {};
+  bool              splashShown          = false;
+  unsigned long     lastSensorReadMs     = 0;
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+static void updateAllData(const SensorReadings &readings) {
+  graphUpdateBounds(readings.deltaF);
+  histogramUpdateData(readings.deltaF);
+  graphUpdateData(readings.deltaF);
   webUpdate(readings);
   Serial.printf("BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n", readings.bmpF, readings.shtF, readings.deltaF);
 }
 
-void setup() {
-  Serial.begin(115200);
-
-  // u8g2.begin() initializes Wire using the pins passed in the constructor.
-  u8g2.begin();
-
-  sensorsInit(Hardware::Pins::I2C_SDA, Hardware::Pins::I2C_SCL);
-
-  if (!rtcBegin()) {
-    RtcStatus status = rtcGetStatus();
-    Serial.printf("[RTC] Init failed: %s\n", status.error.c_str());
-  }
-
-  ApConfig cfg = loadApConfig();
-  webBegin(cfg.ssid.c_str(), cfg.password.c_str());
-
-  buttonSetup();
-//  scanI2C();
-}
-
-void loop() {
-  static PanelManager  panelMgr;
-  static bool histogramViewEnabled = false;
-  static bool splashShown = false;
-  static unsigned long lastSensorReading  = 0;
-  static SensorReadings lastReadings      = {};
-
-  unsigned long now = millis();
-
-  if (!splashShown) {
-    // Show splash, then network, I2C scan, and RTC panels in sequence
-    panelMgr.setPanel(Panel::SPLASH, panelMgr.splashMs, PanelPayload(), now);
-/*
-    PanelPayload networkData;
-    networkGetInfo(networkData.networkSsid, networkData.networkIp);
-    panelMgr.enqueuePanelBack(Panel::NETWORK_INFO, panelMgr.networkInfoMs, networkData);
-    scanI2C();
-    panelMgr.enqueuePanelBack(Panel::I2C_SCAN, panelMgr.i2cScanMs, PanelPayload());
-    panelMgr.enqueuePanelBack(Panel::RTC_STATUS, panelMgr.rtcStatusMs, PanelPayload());
-*/
-
-    splashShown = true;
-  }
-
-  buttonTick();
-  rtcHandle();
-  webHandleClients();
+// Returns true if a base-view redraw should be forced.
+static bool processButtonEvents(AppState &state, unsigned long now) {
+  bool forceRedraw = false;
 
   if (buttonSplashPending()) {
     buttonClearSplashPending();
-    panelMgr.setPanel(Panel::SPLASH, panelMgr.splashMs, PanelPayload(), now);
+    state.panelMgr.setPanel(Panel::SPLASH, state.panelMgr.splashMs, PanelPayload(), now);
   }
 
   if (buttonMenuPending()) {
     buttonClearMenuPending();
-    panelMgr.setPanel(Panel::MENU, panelMgr.menuMs, PanelPayload(), now);
+    state.panelMgr.setPanel(Panel::MENU, state.panelMgr.menuMs, PanelPayload(), now);
   }
 
   if (buttonI2cScanPending()) {
     buttonClearI2cScanPending();
     scanI2C();
-    panelMgr.setPanel(Panel::I2C_SCAN, panelMgr.i2cScanMs, PanelPayload(), now);
+    state.panelMgr.setPanel(Panel::I2C_SCAN, state.panelMgr.i2cScanMs, PanelPayload(), now);
   }
 
   if (buttonRtcStatusPending()) {
     buttonClearRtcStatusPending();
-    panelMgr.setPanel(Panel::RTC_STATUS, panelMgr.rtcStatusMs, PanelPayload(), now);
+    state.panelMgr.setPanel(Panel::RTC_STATUS, state.panelMgr.rtcStatusMs, PanelPayload(), now);
   }
 
   if (buttonNetworkInfoPending()) {
     PanelPayload panelData;
     networkGetInfo(panelData.networkSsid, panelData.networkIp);
     buttonClearNetworkInfoPending();
-    panelMgr.setPanel(Panel::NETWORK_INFO, panelMgr.networkInfoMs, panelData, now);
+    state.panelMgr.setPanel(Panel::NETWORK_INFO, state.panelMgr.networkInfoMs, panelData, now);
   }
 
-  bool forceBaseRedraw = false;
   if (buttonHistogramTogglePending()) {
     buttonClearHistogramTogglePending();
-    histogramViewEnabled = !histogramViewEnabled;
-    Serial.printf("[BTN1] Base view: %s\n", histogramViewEnabled ? "Histogram" : "Graph");
-    forceBaseRedraw = true;
+    Panel nextBasePanel = (state.panelMgr.primaryPanel == Panel::GRAPH)
+      ? Panel::HISTOGRAM
+      : Panel::GRAPH;
+    state.panelMgr.setPanel(nextBasePanel, 0, PanelPayload(), now);
+    Serial.printf("[BTN1] Base view: %s\n", nextBasePanel == Panel::HISTOGRAM ? "Histogram" : "Graph");
+    forceRedraw = true;
   }
 
-  if (buttonGraphResetStyle1Pending()) {
-    buttonClearGraphResetStyle1Pending();
-    resetGraphAndHistogram();
-    Serial.println("[BTN1] Full reset: graph bounds/history + histogram");
-    forceBaseRedraw = true;
-  }
-
-  // Always update graph data on schedule, regardless of what's on screen.
-  bool freshData = false;
-  if (now - lastSensorReading >= (READ_INTERVAL_SECONDS * 1000UL)) {
-    lastReadings = readSensors();
-    bool bmpError = isnan(lastReadings.bmpF);
-    bool shtError = isnan(lastReadings.shtF);
-
-    if (bmpError || shtError) {
-      String nextError;
-      if (bmpError && shtError) {
-        nextError = "BMP and SHT";
-      } else if (bmpError) {
-        nextError = "BMP";
-      } else {
-        nextError = "SHT";
-      }
-
-      PanelPayload panelData;
-      panelData.errorMessage = nextError;
-      panelMgr.setPanel(Panel::ERROR_MESSAGE, panelMgr.errorMessageMs, panelData, now);
+  if (buttonPanelDataResetPending()) {
+    buttonClearPanelDataResetPending();
+    if (state.panelMgr.currentPanel == Panel::GRAPH) {
+      graphResetBounds();
+      Serial.println("[BTN1] Graph bounds reset");
+    } else if (state.panelMgr.currentPanel == Panel::HISTOGRAM) {
+      histogramReset();
+      Serial.println("[BTN1] Histogram reset");
     } else {
-      updateGraphData(lastReadings);
-      freshData = true;
+      Serial.println("[BTN1] Reset ignored: not on graph or histogram panel");
     }
-
-    lastSensorReading = now;
+    forceRedraw = true;
   }
 
-  // Check panel expiration
-  panelMgr.checkExpiration(now);
+  return forceRedraw;
+}
 
-  // Render graph or delegate to panel manager
-  if (panelMgr.currentPanel == Panel::GRAPH) {
-    if (panelMgr.currentPanel != panelMgr.prevPanel || freshData || forceBaseRedraw) {
-      if (histogramViewEnabled) {
-        showHistogram(u8g2, lastReadings);
-      } else {
-        showGraph(u8g2, lastReadings);
-      }
+// Returns true if fresh sensor data was successfully read.
+static bool sensorsUpdate(AppState &state, unsigned long now) {
+  if (now - state.lastSensorReadMs < READ_INTERVAL_SECONDS * 1000UL) {
+    return false;
+  }
+
+  state.lastReadings    = readSensors();
+  state.lastSensorReadMs = now;
+
+  bool bmpError = isnan(state.lastReadings.bmpF);
+  bool shtError = isnan(state.lastReadings.shtF);
+
+  if (bmpError || shtError) {
+    String nextError = (bmpError && shtError) ? "BMP and SHT"
+                     : bmpError               ? "BMP"
+                                              : "SHT";
+    PanelPayload panelData;
+    panelData.errorMessage = nextError;
+    state.panelMgr.setPanel(Panel::ERROR_MESSAGE, state.panelMgr.errorMessageMs, panelData, now);
+    return false;
+  }
+
+  updateAllData(state.lastReadings);
+  return true;
+}
+
+static void renderFrame(AppState &state, bool freshData, bool forceRedraw, unsigned long now) {
+  state.panelMgr.checkExpiration(now);
+
+  U8G2 &display = displayDevice();
+
+  if (state.panelMgr.currentPanel == Panel::GRAPH) {
+    if (state.panelMgr.currentPanel != state.panelMgr.prevPanel || freshData || forceRedraw) {
+      showGraph(display, state.lastReadings);
+    }
+  } else if (state.panelMgr.currentPanel == Panel::HISTOGRAM) {
+    if (state.panelMgr.currentPanel != state.panelMgr.prevPanel || freshData || forceRedraw) {
+      showHistogram(display, state.lastReadings);
     }
   } else {
-    panelMgr.render(u8g2, now);
+    state.panelMgr.render(display, now);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Arduino entry points
+// ---------------------------------------------------------------------------
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+  Serial.println("\n[SETUP] Starting up...");
+
+  displayBegin();
+  sensorsBegin(Hardware::Pins::I2C_SDA, Hardware::Pins::I2C_SCL);
+
+  if (!rtcBegin()) {
+    RtcStatus status = rtcGetStatus();
+    Serial.printf("[RTC] Init failed: %s\n", status.error.c_str());
+  }
+  // all hardware started
+  scanI2C();
+
+  ApConfig cfg = loadApConfig();
+  webBegin(cfg.ssid.c_str(), cfg.password.c_str());
+
+  buttonBegin();
+}
+
+void loop() {
+  static AppState state;
+  unsigned long now = millis();
+
+  if (!state.splashShown) {
+    state.panelMgr.setPanel(Panel::SPLASH, state.panelMgr.splashMs, PanelPayload(), now);
+    state.splashShown = true;
+  }
+
+  buttonTick();
+  rtcTick();
+  webHandleClients();
+
+  bool forceRedraw = processButtonEvents(state, now);
+  bool freshData   = sensorsUpdate(state, now);
+  renderFrame(state, freshData, forceRedraw, now);
 }

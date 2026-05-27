@@ -1,6 +1,6 @@
 #pragma once
 
-void buttonSetup();
+void buttonBegin();
 void buttonTick();
 bool buttonSplashPending();
 void buttonClearSplashPending();
@@ -14,5 +14,5 @@ bool buttonRtcStatusPending();
 void buttonClearRtcStatusPending();
 bool buttonHistogramTogglePending();
 void buttonClearHistogramTogglePending();
-bool buttonGraphResetStyle1Pending();
-void buttonClearGraphResetStyle1Pending();
+bool buttonPanelDataResetPending();
+void buttonClearPanelDataResetPending();

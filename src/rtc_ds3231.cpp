@@ -97,7 +97,7 @@ bool rtcBegin() {
   return true;
 }
 
-void rtcHandle() {
+void rtcTick() {
   if (sqwPulsePending) {
     sqwPulsePending = false;
     // Placeholder for pulse-driven tasks if needed later.

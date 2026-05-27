@@ -3,6 +3,7 @@
 PanelManager::PanelManager()
   : currentPanel(Panel::GRAPH),
     prevPanel(Panel::GRAPH),
+    primaryPanel(Panel::GRAPH),
     panelUntil(0),
     lastRender(0),
     panelData(),
@@ -60,6 +61,10 @@ bool PanelManager::dequeuePanel(PanelRequest &request) {
 bool PanelManager::setPanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now) {
   bool dataChanged = !(panelData == data);
 
+  if (panel == Panel::GRAPH || panel == Panel::HISTOGRAM) {
+    primaryPanel = panel;
+  }
+
   // If same panel, just update duration and data if needed
   if (panel == currentPanel) {
     if (durationMs != 0) {
@@ -97,7 +102,7 @@ bool PanelManager::checkExpiration(unsigned long now) {
       activatePanel(nextRequest.panel, nextRequest.durationMs, nextRequest.data, now);
     } else {
       prevPanel = currentPanel;
-      currentPanel = nextPanel(currentPanel);
+      currentPanel = primaryPanel;
       panelUntil = 0;
       lastRender = 0;
     }

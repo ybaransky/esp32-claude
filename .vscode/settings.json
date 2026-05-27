@@ -1,0 +1,6 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "&": true,
+        "C:\\Users\\ybaransky\\.platformio\\penv\\Scripts\\python.exe": true
+    }
+}
