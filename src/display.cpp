@@ -1,7 +1,6 @@
 #include "display.h"
 #include "graph.h"
 #include "histogram.h"
-#include "i2c_scanner.h"
 #include "rtc_ds3231.h"
 #include "hardware.h"
 #include <math.h>
@@ -24,6 +23,27 @@ U8G2 &displayDevice() {
   return display;
 }
 
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+static void drawTitleBar(U8G2 &u8g2, const char *title, unsigned long remainingSecs) {
+  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
+  u8g2.setDrawColor(0);
+  u8g2.drawStr(2, 8, title);
+
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%lus", remainingSecs);
+  int tw = u8g2.getStrWidth(buf);
+  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, 8, buf);
+
+  u8g2.setDrawColor(1);
+}
+
+// ---------------------------------------------------------------------------
+// Graph
+// ---------------------------------------------------------------------------
+
 static Bounds getPaddedBounds(const Bounds &bounds, float data) {
   float span = bounds.maximum - bounds.minimum;
   float pad  = (span > 0.0f) ? span * 0.05f : 0.1f * data;
@@ -36,163 +56,112 @@ static int diffToGraphY(float value, const Bounds &bounds) {
   return GRAPH_BOTTOM - static_cast<int>(normalized * (GRAPH_HEIGHT - 1) + 0.5f);
 }
 
-void showGraph(U8G2 &u8g2, const SensorReadings &readings) {
-  float value = readings.deltaF;
-  Bounds graphBounds = graphGetGraphBounds();
-  Bounds totalBounds = graphGetTotalBounds();
-  Bounds bounds      = getPaddedBounds(graphBounds, value);
+static void drawGraphAxes(U8G2 &u8g2, int graphLeft, float value,
+                          const Bounds &bounds, const char *yFmt) {
+  char maxBuf[12], midBuf[12], minBuf[12];
+  snprintf(maxBuf, sizeof(maxBuf), yFmt, bounds.maximum);
+  snprintf(midBuf, sizeof(midBuf), yFmt, value);
+  snprintf(minBuf, sizeof(minBuf), yFmt, bounds.minimum);
 
-  const float *history      = graphGetHistory();
-  int          historyCount = graphGetHistoryCount();
+  u8g2.drawStr(0, 7,                                  maxBuf);
+  u8g2.drawStr(0, (GRAPH_TOP + GRAPH_BOTTOM) / 2 + 3, midBuf);
+  u8g2.drawStr(0, GRAPH_BOTTOM,                        minBuf);
 
-  bool hasNegative = (value < 0.0f) || (bounds.minimum < 0.0f) || (bounds.maximum < 0.0f);
-  int effectiveGraphLeft = GRAPH_LEFT + (hasNegative ? 6 : 0);
+  u8g2.drawVLine(graphLeft - 1, GRAPH_TOP, GRAPH_HEIGHT);
+  u8g2.drawHLine(graphLeft - 1, GRAPH_BOTTOM, GRAPH_WIDTH);
+  u8g2.drawHLine(graphLeft - 4, diffToGraphY(value, bounds), 4);
+}
 
-  const char *yFmt      = hasNegative ? "%5.2f" : "%4.2f";
-  const char *sensorFmt = (readings.bmpF < 0.0f) | (readings.shtF < 0.0f) ? "%6.2f" : "%5.2f";
-  const char *minmaxFmt = (totalBounds.minimum < 0.0f) | (totalBounds.maximum < 0.0f) ? "%5.2f" : "%4.2f";
+static void drawGraphHistory(U8G2 &u8g2, int graphLeft,
+                             const float *history, int count, const Bounds &bounds) {
+  if (count == 1) {
+    u8g2.drawPixel(graphLeft, diffToGraphY(history[0], bounds));
+    return;
+  }
+  for (int i = 1; i < count; i++) {
+    u8g2.drawLine(
+      graphLeft + i - 1, diffToGraphY(history[i - 1], bounds),
+      graphLeft + i,     diffToGraphY(history[i],     bounds)
+    );
+  }
+}
 
-  char maxBuf[12], midBuf[12], minBuf[12], statusBuf[28], countBuf[12], minmaxBuf[28];
-  snprintf(maxBuf,   sizeof(maxBuf),   yFmt, bounds.maximum);
-  snprintf(midBuf,   sizeof(midBuf),   yFmt, value);
-  snprintf(minBuf,   sizeof(minBuf),   yFmt, bounds.minimum);
-  snprintf(countBuf, sizeof(countBuf), "%lu", readings.readTime / 1000UL);
+static void drawGraphStatusBar(U8G2 &u8g2, const SensorReadings &r,
+                               const Bounds &totalBounds) {
+  const char *sensorFmt = (r.bmpF < 0.0f || r.shtF < 0.0f)               ? "%6.2f" : "%5.2f";
+  const char *minmaxFmt = (totalBounds.minimum < 0.0f || totalBounds.maximum < 0.0f) ? "%5.2f" : "%4.2f";
 
-  int n = snprintf(statusBuf, sizeof(statusBuf), "BMP=");
-  n    += snprintf(statusBuf + n, sizeof(statusBuf) - n, sensorFmt, readings.bmpF);
-  n    += snprintf(statusBuf + n, sizeof(statusBuf) - n, "  min=");
-         snprintf(statusBuf + n, sizeof(statusBuf) - n, minmaxFmt, totalBounds.minimum);
+  char statusBuf[28], minmaxBuf[28], countBuf[12];
+  snprintf(countBuf, sizeof(countBuf), "%lu", r.readTime / 1000UL);
+
+  int n;
+  n  = snprintf(statusBuf, sizeof(statusBuf), "BMP=");
+  n += snprintf(statusBuf + n, sizeof(statusBuf) - n, sensorFmt, r.bmpF);
+  n += snprintf(statusBuf + n, sizeof(statusBuf) - n, "  min=");
+       snprintf(statusBuf + n, sizeof(statusBuf) - n, minmaxFmt, totalBounds.minimum);
 
   n  = snprintf(minmaxBuf, sizeof(minmaxBuf), "SHT=");
-  n += snprintf(minmaxBuf + n, sizeof(minmaxBuf) - n, sensorFmt, readings.shtF);
+  n += snprintf(minmaxBuf + n, sizeof(minmaxBuf) - n, sensorFmt, r.shtF);
   n += snprintf(minmaxBuf + n, sizeof(minmaxBuf) - n, "  max=");
        snprintf(minmaxBuf + n, sizeof(minmaxBuf) - n, minmaxFmt, totalBounds.maximum);
-
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_5x7_tr);
-  u8g2.drawStr(0, 7,                                maxBuf);
-  u8g2.drawStr(0, (GRAPH_TOP + GRAPH_BOTTOM) / 2 + 3, midBuf);
-  u8g2.drawStr(0, GRAPH_BOTTOM,                     minBuf);
-
-  u8g2.drawVLine(effectiveGraphLeft - 1, GRAPH_TOP, GRAPH_HEIGHT);
-  u8g2.drawHLine(effectiveGraphLeft - 1, GRAPH_BOTTOM, GRAPH_WIDTH);
-  u8g2.drawHLine(effectiveGraphLeft - 4, diffToGraphY(value, bounds), 4);
-
-  if (historyCount == 1) {
-    u8g2.drawPixel(effectiveGraphLeft, diffToGraphY(history[0], bounds));
-  } else {
-    for (int i = 1; i < historyCount; i++) {
-      u8g2.drawLine(
-        effectiveGraphLeft + i - 1, diffToGraphY(history[i - 1], bounds),
-        effectiveGraphLeft + i,     diffToGraphY(history[i],     bounds)
-      );
-    }
-  }
 
   int countX = DISPLAY_WIDTH - u8g2.getStrWidth(countBuf);
   u8g2.drawStr(0,      STATUS_BASELINE_Y, statusBuf);
   u8g2.drawStr(0,      MINMAX_BASELINE_Y, minmaxBuf);
   u8g2.drawStr(countX, MINMAX_BASELINE_Y, countBuf);
-  u8g2.sendBuffer();
 }
 
-void showHistogram(U8G2 &u8g2, const SensorReadings &readings) {
-  const int    *bins        = histogramGetBins();
-  const uint32_t sampleCount = histogramGetSampleCount();
-  const float  centerValue  = histogramGetCenterValueF();
-  const int32_t halfRange   = histogramGetHalfRange();
+void showGraph(U8G2 &u8g2, const SensorReadings &readings) {
+  Bounds graphBounds = graphGetGraphBounds();
+  Bounds totalBounds = graphGetTotalBounds();
+  Bounds bounds      = getPaddedBounds(graphBounds, readings.deltaF);
 
-  int maxBinIndex = HISTOGRAM_CENTER_INDEX;
-  int maxBinCount = 0;
-  for (int i = 0; i < HISTOGRAM_BIN_COUNT; ++i) {
-    if (bins[i] > maxBinCount) {
-      maxBinCount = bins[i];
-      maxBinIndex = i;
-    }
-  }
-  const float maxCountDiffValue = centerValue +
-    static_cast<float>(maxBinIndex - HISTOGRAM_CENTER_INDEX) * HISTOGRAM_BIN_SIZE_F;
-
-  // Symmetric display window around the fixed center value.
-  const float leftValue  = centerValue - static_cast<float>(halfRange) * HISTOGRAM_BIN_SIZE_F;
-  const float rightValue = centerValue + static_cast<float>(halfRange) * HISTOGRAM_BIN_SIZE_F;
-
-  // Visible bin range: CENTER ± halfRange
-  const int startBin       = HISTOGRAM_CENTER_INDEX - static_cast<int>(halfRange);
-  const int endBin         = HISTOGRAM_CENTER_INDEX + static_cast<int>(halfRange);
-  const int visibleBinCount = endBin - startBin + 1;  // = 2*halfRange + 1
-
-  char yTopBuf[10], yMidBuf[10];
-  char xMinBuf[10], xMidBuf[10], xMaxBuf[10];
-  char sampleBuf[16];
-  char currentDiffBuf[16];
-  char maxCountDiffBuf[16];
-  snprintf(xMinBuf,   sizeof(xMinBuf),   "%.2f", leftValue);
-  snprintf(xMidBuf,   sizeof(xMidBuf),   "%.2f", centerValue);
-  snprintf(xMaxBuf,   sizeof(xMaxBuf),   "%.2f", rightValue);
-  snprintf(sampleBuf, sizeof(sampleBuf), "N=%lu",  static_cast<unsigned long>(sampleCount));
-  snprintf(currentDiffBuf, sizeof(currentDiffBuf), "%.2f", readings.deltaF);
-  snprintf(maxCountDiffBuf, sizeof(maxCountDiffBuf), "%.2f", maxCountDiffValue);
-
-  const int yLabelGap  = 2;
-  int sampleWidth = u8g2.getStrWidth(sampleBuf);
-  int currentDiffWidth = u8g2.getStrWidth(currentDiffBuf);
-  int maxCountDiffWidth = u8g2.getStrWidth(maxCountDiffBuf);
-  int infoWidth = sampleWidth;
-  if (currentDiffWidth > infoWidth) infoWidth = currentDiffWidth;
-  if (maxCountDiffWidth > infoWidth) infoWidth = maxCountDiffWidth;
-  const int sampleX    = DISPLAY_WIDTH - infoWidth - 1;
-  const int sampleY    = GRAPH_TOP + 6;
-  const int currentDiffY = sampleY + 8;
-  const int maxCountDiffY = currentDiffY + 8;
-
-  const int yAxisMax = histogramGetLatchedMaxFrequency();
-  const int yAxisMid = (yAxisMax > 1) ? ((yAxisMax + 1) / 2) : 0;
-  snprintf(yTopBuf, sizeof(yTopBuf), "%d", yAxisMax);
-  snprintf(yMidBuf, sizeof(yMidBuf), "%d", yAxisMid);
-  const int yZeroWidth = u8g2.getStrWidth("0");
-  int yLabelWidth = u8g2.getStrWidth(yTopBuf);
-  int yMidWidth   = u8g2.getStrWidth(yMidBuf);
-  if (yMidWidth   > yLabelWidth) yLabelWidth = yMidWidth;
-  if (yLabelWidth < yZeroWidth)  yLabelWidth = yZeroWidth;
-
-  const int axisLeftX  = yLabelWidth + yLabelGap;
-  const int plotLeftX  = axisLeftX + 1;
-  int plotWidth = DISPLAY_WIDTH - plotLeftX;
-  if (plotWidth > GRAPH_WIDTH) plotWidth = GRAPH_WIDTH;
-  if (plotWidth < 1)           plotWidth = 1;
-  const bool aggregateBinsPerPixel = visibleBinCount > plotWidth;
-  const int activePlotWidth = aggregateBinsPerPixel ? plotWidth : visibleBinCount;
-  const int activePlotLeftX = plotLeftX + ((plotWidth - activePlotWidth) / 2);
-  const int axisRightX = plotLeftX + plotWidth - 1;
-
-  // One pixel per index when possible; otherwise aggregate indices per pixel.
-  int bucketCounts[GRAPH_WIDTH] = {0};
-  if (aggregateBinsPerPixel) {
-    for (int col = 0; col < activePlotWidth; ++col) {
-      const int binStart      = startBin + (col       * visibleBinCount) / activePlotWidth;
-      const int binEndExcl    = startBin + ((col + 1) * visibleBinCount) / activePlotWidth;
-      int bucketCount = 0;
-      for (int i = binStart; i < binEndExcl; ++i) {
-        if (i >= 0 && i < HISTOGRAM_BIN_COUNT) {
-          bucketCount += bins[i];
-        }
-      }
-      bucketCounts[col] = bucketCount;
-    }
-  } else {
-    for (int col = 0; col < activePlotWidth; ++col) {
-      const int binIndex = startBin + col;
-      bucketCounts[col] = (binIndex >= 0 && binIndex < HISTOGRAM_BIN_COUNT) ? bins[binIndex] : 0;
-    }
-  }
+  bool       hasNeg    = readings.deltaF < 0.0f || bounds.minimum < 0.0f || bounds.maximum < 0.0f;
+  int        graphLeft = GRAPH_LEFT + (hasNeg ? 6 : 0);
+  const char *yFmt     = hasNeg ? "%5.2f" : "%4.2f";
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_5x7_tr);
+  drawGraphAxes(u8g2, graphLeft, readings.deltaF, bounds, yFmt);
+  drawGraphHistory(u8g2, graphLeft, graphGetHistory(), graphGetHistoryCount(), bounds);
+  drawGraphStatusBar(u8g2, readings, totalBounds);
+  u8g2.sendBuffer();
+}
 
-  u8g2.drawVLine(axisLeftX, GRAPH_TOP, GRAPH_HEIGHT);
-  u8g2.drawHLine(axisLeftX, GRAPH_BOTTOM, axisRightX - axisLeftX + 1);
+// ---------------------------------------------------------------------------
+// Histogram
+// ---------------------------------------------------------------------------
+
+static void buildHistogramBuckets(const int *bins, int startBin, int endBin,
+                                  int plotWidth, int *out) {
+  const int visibleBinCount = endBin - startBin + 1;
+  const bool aggregate      = visibleBinCount > plotWidth;
+
+  for (int col = 0; col < plotWidth; ++col) {
+    if (aggregate) {
+      const int binStart   = startBin + (col       * visibleBinCount) / plotWidth;
+      const int binEndExcl = startBin + ((col + 1) * visibleBinCount) / plotWidth;
+      int count = 0;
+      for (int i = binStart; i < binEndExcl; ++i) {
+        if (i >= 0 && i < HISTOGRAM_BIN_COUNT) count += bins[i];
+      }
+      out[col] = count;
+    } else {
+      const int idx = startBin + col;
+      out[col] = (idx >= 0 && idx < HISTOGRAM_BIN_COUNT) ? bins[idx] : 0;
+    }
+  }
+}
+
+static void drawHistogramYAxis(U8G2 &u8g2, int axisLeftX,
+                               int yAxisMax, int yAxisMid) {
+  char yTopBuf[10], yMidBuf[10];
+  snprintf(yTopBuf, sizeof(yTopBuf), "%d", yAxisMax);
+  snprintf(yMidBuf, sizeof(yMidBuf), "%d", yAxisMid);
+
   u8g2.drawStr(0, GRAPH_TOP + 7, yTopBuf);
+  u8g2.drawStr(0, GRAPH_BOTTOM,  "0");
+
   if (yAxisMax > 1) {
     const int yMid = GRAPH_BOTTOM - static_cast<int>(
       (static_cast<float>(yAxisMid) / static_cast<float>(yAxisMax)) * (GRAPH_HEIGHT - 1) + 0.5f);
@@ -202,97 +171,161 @@ void showHistogram(U8G2 &u8g2, const SensorReadings &readings) {
     u8g2.drawHLine(axisLeftX - 1, yMid, 2);
     u8g2.drawStr(0, yMidLabelY, yMidBuf);
   }
-  u8g2.drawStr(0, GRAPH_BOTTOM, "0");
+}
 
-  // Sample count in the upper-right corner.
-  u8g2.setDrawColor(0);
-  u8g2.drawBox(sampleX - 1, GRAPH_TOP, infoWidth + 2, 24);
-  u8g2.setDrawColor(1);
-  u8g2.drawStr(sampleX, sampleY, sampleBuf);
-  u8g2.drawStr(sampleX, currentDiffY, currentDiffBuf);
-  u8g2.drawStr(sampleX, maxCountDiffY, maxCountDiffBuf);
+static void drawHistogramXAxis(U8G2 &u8g2, int axisLeftX, int axisCenterX,
+                               int axisRightX, float leftValue,
+                               float centerValue, float rightValue) {
+  char xMinBuf[10], xMidBuf[10], xMaxBuf[10];
+  snprintf(xMinBuf, sizeof(xMinBuf), "%.2f", leftValue);
+  snprintf(xMidBuf, sizeof(xMidBuf), "%.2f", centerValue);
+  snprintf(xMaxBuf, sizeof(xMaxBuf), "%.2f", rightValue);
 
-  // X-axis always spans the full plot width.
-  const int axisCenterX = plotLeftX + (plotWidth - 1) / 2;
-  const int xLabelY     = GRAPH_BOTTOM + 10;
-
+  const int xLabelY = GRAPH_BOTTOM + 10;
   u8g2.drawVLine(axisLeftX,   GRAPH_BOTTOM, 2);
   u8g2.drawVLine(axisCenterX, GRAPH_BOTTOM, 2);
   u8g2.drawVLine(axisRightX,  GRAPH_BOTTOM, 2);
 
-  int xMinLabelX = axisLeftX   - (u8g2.getStrWidth(xMinBuf) / 2);
-  int xMidLabelX = axisCenterX - (u8g2.getStrWidth(xMidBuf) / 2);
-  int xMaxLabelX = axisRightX  - (u8g2.getStrWidth(xMaxBuf) / 2);
+  auto clampedX = [&](int x, int labelWidth) {
+    if (x < 0) return 0;
+    if (x > DISPLAY_WIDTH - labelWidth) return DISPLAY_WIDTH - labelWidth;
+    return x;
+  };
+  u8g2.drawStr(clampedX(axisLeftX   - u8g2.getStrWidth(xMinBuf) / 2, u8g2.getStrWidth(xMinBuf)), xLabelY, xMinBuf);
+  u8g2.drawStr(clampedX(axisCenterX - u8g2.getStrWidth(xMidBuf) / 2, u8g2.getStrWidth(xMidBuf)), xLabelY, xMidBuf);
+  u8g2.drawStr(clampedX(axisRightX  - u8g2.getStrWidth(xMaxBuf) / 2, u8g2.getStrWidth(xMaxBuf)), xLabelY, xMaxBuf);
+}
 
-  if (xMinLabelX < 0) xMinLabelX = 0;
-  if (xMidLabelX < 0) xMidLabelX = 0;
-  if (xMaxLabelX < 0) xMaxLabelX = 0;
-  if (xMinLabelX > DISPLAY_WIDTH - u8g2.getStrWidth(xMinBuf))
-    xMinLabelX = DISPLAY_WIDTH - u8g2.getStrWidth(xMinBuf);
-  if (xMidLabelX > DISPLAY_WIDTH - u8g2.getStrWidth(xMidBuf))
-    xMidLabelX = DISPLAY_WIDTH - u8g2.getStrWidth(xMidBuf);
-  if (xMaxLabelX > DISPLAY_WIDTH - u8g2.getStrWidth(xMaxBuf))
-    xMaxLabelX = DISPLAY_WIDTH - u8g2.getStrWidth(xMaxBuf);
+static void drawHistogramInfoBox(U8G2 &u8g2, int x, int y, int width,
+                                 uint32_t sampleCount, float currentDiff,
+                                 float maxCountDiff) {
+  char sampleBuf[16], currentDiffBuf[16], maxCountDiffBuf[16];
+  snprintf(sampleBuf,      sizeof(sampleBuf),      "N=%lu",  static_cast<unsigned long>(sampleCount));
+  snprintf(currentDiffBuf, sizeof(currentDiffBuf), "%.2f",   currentDiff);
+  snprintf(maxCountDiffBuf,sizeof(maxCountDiffBuf),"%.2f",   maxCountDiff);
 
-  u8g2.drawStr(xMinLabelX, xLabelY, xMinBuf);
-  u8g2.drawStr(xMidLabelX, xLabelY, xMidBuf);
-  u8g2.drawStr(xMaxLabelX, xLabelY, xMaxBuf);
+  u8g2.setDrawColor(0);
+  u8g2.drawBox(x - 1, GRAPH_TOP, width + 2, 24);
+  u8g2.setDrawColor(1);
+  u8g2.drawStr(x, y,      sampleBuf);
+  u8g2.drawStr(x, y +  8, currentDiffBuf);
+  u8g2.drawStr(x, y + 16, maxCountDiffBuf);
+}
+
+static void drawHistogramBars(U8G2 &u8g2, const int *buckets, int count,
+                              int startX, int yAxisMax, int axisCenterX) {
+  for (int col = 0; col < count; ++col) {
+    if (buckets[col] <= 0) continue;
+    int barHeight = static_cast<int>(
+      (static_cast<float>(buckets[col]) / static_cast<float>(yAxisMax)) * (GRAPH_HEIGHT - 1) + 0.5f);
+    if (barHeight < 1)             barHeight = 1;
+    if (barHeight > GRAPH_HEIGHT - 1) barHeight = GRAPH_HEIGHT - 1;
+    u8g2.drawVLine(startX + col, GRAPH_BOTTOM - barHeight, barHeight);
+  }
+
+  // Dotted vertical line at the fixed center.
+  for (int y = GRAPH_TOP; y <= GRAPH_BOTTOM; y += 2) {
+    u8g2.drawPixel(axisCenterX, y);
+  }
+}
+
+void showHistogram(U8G2 &u8g2, const SensorReadings &readings) {
+  const int     *bins        = histogramGetBins();
+  const uint32_t sampleCount = histogramGetSampleCount();
+  const float    centerValue = histogramGetCenterValueF();
+  const int32_t  halfRange   = histogramGetHalfRange();
+  const int      yAxisMax    = histogramGetLatchedMaxFrequency();
+  const int      yAxisMid    = (yAxisMax > 1) ? ((yAxisMax + 1) / 2) : 0;
+
+  // X-axis domain
+  const float leftValue  = centerValue - static_cast<float>(halfRange) * HISTOGRAM_BIN_SIZE_F;
+  const float rightValue = centerValue + static_cast<float>(halfRange) * HISTOGRAM_BIN_SIZE_F;
+  const int   startBin   = HISTOGRAM_CENTER_INDEX - static_cast<int>(halfRange);
+  const int   endBin     = HISTOGRAM_CENTER_INDEX + static_cast<int>(halfRange);
+
+  // Y-axis label width determines left margin
+  char yTopBuf[10];
+  snprintf(yTopBuf, sizeof(yTopBuf), "%d", yAxisMax);
+  const int yLabelWidth = u8g2.getStrWidth(yTopBuf);
+  const int axisLeftX   = yLabelWidth + 2;
+  const int plotLeftX   = axisLeftX + 1;
+  int plotWidth = DISPLAY_WIDTH - plotLeftX;
+  if (plotWidth > GRAPH_WIDTH) plotWidth = GRAPH_WIDTH;
+  if (plotWidth < 1)           plotWidth = 1;
+
+  // Info box width (right-side overlay): widest of the three stat strings
+  char currentDiffBuf[16], maxCountDiffBuf[16];
+  const int maxBinIndex = [&]() {
+    int best = HISTOGRAM_CENTER_INDEX, bestCount = 0;
+    for (int i = 0; i < HISTOGRAM_BIN_COUNT; ++i) {
+      if (bins[i] > bestCount) { bestCount = bins[i]; best = i; }
+    }
+    return best;
+  }();
+  const float maxCountDiffValue = centerValue +
+    static_cast<float>(maxBinIndex - HISTOGRAM_CENTER_INDEX) * HISTOGRAM_BIN_SIZE_F;
+  snprintf(currentDiffBuf,  sizeof(currentDiffBuf),  "%.2f", readings.deltaF);
+  snprintf(maxCountDiffBuf, sizeof(maxCountDiffBuf), "%.2f", maxCountDiffValue);
+
+  char sampleBuf[16];
+  snprintf(sampleBuf, sizeof(sampleBuf), "N=%lu", static_cast<unsigned long>(sampleCount));
+  int infoWidth = u8g2.getStrWidth(sampleBuf);
+  int w = u8g2.getStrWidth(currentDiffBuf);  if (w > infoWidth) infoWidth = w;
+      w = u8g2.getStrWidth(maxCountDiffBuf); if (w > infoWidth) infoWidth = w;
+  const int infoX = DISPLAY_WIDTH - infoWidth - 1;
+
+  // Build buckets: one pixel per bin when possible, aggregate otherwise
+  int visibleBinCount = endBin - startBin + 1;
+  int activePlotWidth = (visibleBinCount > plotWidth) ? plotWidth : visibleBinCount;
+  int activePlotLeftX = plotLeftX + ((plotWidth - activePlotWidth) / 2);
+  int axisRightX      = plotLeftX + plotWidth - 1;
+  int axisCenterX     = plotLeftX + (plotWidth - 1) / 2;
+
+  int buckets[GRAPH_WIDTH] = {};
+  buildHistogramBuckets(bins, startBin, endBin, activePlotWidth, buckets);
+
+  // Draw
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_5x7_tr);
+
+  u8g2.drawVLine(axisLeftX, GRAPH_TOP, GRAPH_HEIGHT);
+  u8g2.drawHLine(axisLeftX, GRAPH_BOTTOM, axisRightX - axisLeftX + 1);
+
+  drawHistogramYAxis(u8g2, axisLeftX, yAxisMax, yAxisMid);
+  drawHistogramXAxis(u8g2, axisLeftX, axisCenterX, axisRightX,
+                     leftValue, centerValue, rightValue);
+  drawHistogramInfoBox(u8g2, infoX, GRAPH_TOP + 6, infoWidth,
+                       sampleCount, readings.deltaF, maxCountDiffValue);
 
   if (yAxisMax > 0) {
-    for (int col = 0; col < activePlotWidth; ++col) {
-      const int bucketCount = bucketCounts[col];
-      if (bucketCount <= 0) continue;
-
-      int barHeight = static_cast<int>(
-        (static_cast<float>(bucketCount) / static_cast<float>(yAxisMax)) * (GRAPH_HEIGHT - 1) + 0.5f);
-      if (barHeight < 1)            barHeight = 1;
-      if (barHeight > GRAPH_HEIGHT - 1) barHeight = GRAPH_HEIGHT - 1;
-
-      u8g2.drawVLine(activePlotLeftX + col, GRAPH_BOTTOM - barHeight, barHeight);
-    }
-
-    // Dotted vertical line at the fixed center (first reading's value).
-    for (int y = GRAPH_TOP; y <= GRAPH_BOTTOM; y += 2) {
-      u8g2.drawPixel(axisCenterX, y);
-    }
+    drawHistogramBars(u8g2, buckets, activePlotWidth, activePlotLeftX,
+                      yAxisMax, axisCenterX);
   }
+
   u8g2.sendBuffer();
 }
 
-void showSplash(U8G2 &u8g2, unsigned long remainingSecs) {
-  char timeBuf[8];
-  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
+// ---------------------------------------------------------------------------
+// Info panels
+// ---------------------------------------------------------------------------
 
+void showSplash(U8G2 &u8g2, unsigned long remainingSecs) {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tr);
-
-  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
-  u8g2.setDrawColor(0);
-  u8g2.drawStr(2, 8, "Explanation");
-  u8g2.setDrawColor(1);
+  drawTitleBar(u8g2, "Explanation", remainingSecs);
 
   u8g2.drawStr(2, 22, "Testing the precision");
   u8g2.drawStr(2, 32, "and consistency of");
   u8g2.drawStr(2, 42, "common, off the shelf");
   u8g2.drawStr(2, 52, "temperature sensors");
 
-  int tw = u8g2.getStrWidth(timeBuf);
-  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
-
   u8g2.sendBuffer();
 }
 
 void showMenu(U8G2 &u8g2, unsigned long remainingSecs) {
-  char timeBuf[8];
-  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
-
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_5x7_tr);
-
-  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
-  u8g2.setDrawColor(0);
-  u8g2.drawStr(2, 8, "Menu");
-  u8g2.setDrawColor(1);
+  drawTitleBar(u8g2, "Menu", remainingSecs);
 
   u8g2.drawStr(2, 19, "btn1 1x: Graph/Histogram");
   u8g2.drawStr(2, 29, "btn1 2x: Reset per scrn");
@@ -300,188 +333,120 @@ void showMenu(U8G2 &u8g2, unsigned long remainingSecs) {
   u8g2.drawStr(2, 49, "btn2 2x: I2C scan");
   u8g2.drawStr(2, 59, "btn2 --: RTC status");
 
-  int tw = u8g2.getStrWidth(timeBuf);
-  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
-
   u8g2.sendBuffer();
 }
 
-void showNetworkInfo(U8G2 &u8g2, const String &ssid, const String &ip, unsigned long remainingSecs) {
-  char timeBuf[8];
-  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
-
+void showNetworkInfo(U8G2 &u8g2, const String &ssid, const String &ip,
+                     unsigned long remainingSecs) {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x10_tr); // Restore previous font size for network status values
+  u8g2.setFont(u8g2_font_6x10_tr);
+  drawTitleBar(u8g2, "Network Info", remainingSecs);
 
-  // Title bar
-  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
-  u8g2.setDrawColor(0);
-  u8g2.drawStr(2, 8, "Network Info");
-  u8g2.setDrawColor(1);
-
-  // SSID label + value
   u8g2.drawStr(2, 22, "SSID:");
   u8g2.drawStr(2, 31, ssid.c_str());
-
-  // IP label + value
   u8g2.drawStr(2, 45, "IP:");
   u8g2.drawStr(2, 54, ip.c_str());
-
-  // Countdown bottom-right
-  int tw = u8g2.getStrWidth(timeBuf);
-  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
 
   u8g2.sendBuffer();
 }
 
 void showI2CScan(U8G2 &u8g2, unsigned long remainingSecs) {
-  char timeBuf[8];
-  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
-
-  String line1 = "";
-  String line2 = "";
-  const int maxTextWidth = DISPLAY_WIDTH - 4;
-
-  I2CScanResult scanResult = i2cGetLastScanResult();
-  int foundCount = static_cast<int>(scanResult.count);
+  I2CScanResult scanResult  = i2cGetLastScanResult();
+  int           foundCount  = static_cast<int>(scanResult.count);
+  const int     maxWidth    = DISPLAY_WIDTH - 4;
 
   String foundLine1 = "Found: " + String(foundCount) + " device(s)";
   String foundLine2 = "";
 
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x10_tr);
-
-  if (u8g2.getStrWidth(foundLine1.c_str()) > maxTextWidth) {
-    int split = foundLine1.length() - 1;
-    while (split > 0) {
-      if (foundLine1.charAt(split) == ' ') {
-        String candidate = foundLine1.substring(0, split);
-        if (u8g2.getStrWidth(candidate.c_str()) <= maxTextWidth) {
-          foundLine2 = foundLine1.substring(split + 1);
-          foundLine1 = candidate;
-          break;
-        }
+  // Word-wrap the "Found:" line if it overflows (rare but possible with large counts).
+  if (u8g2.getStrWidth(foundLine1.c_str()) > maxWidth) {
+    for (int split = foundLine1.length() - 1; split > 0; --split) {
+      if (foundLine1.charAt(split) != ' ') continue;
+      String candidate = foundLine1.substring(0, split);
+      if (u8g2.getStrWidth(candidate.c_str()) <= maxWidth) {
+        foundLine2 = foundLine1.substring(split + 1);
+        foundLine1 = candidate;
+        break;
       }
-      split--;
     }
   }
 
-  auto appendToken = [&](String &target, const String &token) {
-    String candidate = target.length() == 0 ? token : (target + " " + token);
-    if (u8g2.getStrWidth(candidate.c_str()) <= maxTextWidth) {
+  // Pack addresses into up to two lines, truncating with "..." if needed.
+  String line1, line2;
+  auto appendToken = [&](String &target, const String &token) -> bool {
+    String candidate = target.isEmpty() ? token : (target + " " + token);
+    if (u8g2.getStrWidth(candidate.c_str()) <= maxWidth) {
       target = candidate;
       return true;
     }
     return false;
   };
 
-  if (scanResult.count == 0) {
+  if (foundCount == 0) {
     line1 = "None";
   } else {
-    bool hasOverflow = false;
+    bool overflow = false;
     for (size_t i = 0; i < scanResult.count; ++i) {
       char addrBuf[8];
       snprintf(addrBuf, sizeof(addrBuf), "0x%02X", scanResult.addresses[i]);
       String token(addrBuf);
-
-      if (!appendToken(line1, token)) {
-        if (!appendToken(line2, token)) {
-          hasOverflow = true;
-        }
+      if (!appendToken(line1, token) && !appendToken(line2, token)) {
+        overflow = true;
       }
     }
-
-    if (hasOverflow) {
+    if (overflow) {
       const String suffix = " ...";
-      while (line2.length() > 0 && u8g2.getStrWidth((line2 + suffix).c_str()) > maxTextWidth) {
+      while (!line2.isEmpty() && u8g2.getStrWidth((line2 + suffix).c_str()) > maxWidth) {
         line2.remove(line2.length() - 1);
       }
       line2.trim();
       line2 += suffix;
     }
-
-    if (line1.length() == 0) {
-      line1 = "None";
-    }
+    if (line1.isEmpty()) line1 = "None";
   }
 
-  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
-  u8g2.setDrawColor(0);
-  u8g2.drawStr(2, 8, "I2C Scan");
-  u8g2.setDrawColor(1);
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+  drawTitleBar(u8g2, "I2C Scan", remainingSecs);
 
   u8g2.drawStr(2, 24, foundLine1.c_str());
   int addressY = 38;
-  if (foundLine2.length() > 0) {
+  if (!foundLine2.isEmpty()) {
     u8g2.drawStr(2, 34, foundLine2.c_str());
     addressY = 48;
   }
   u8g2.drawStr(2, addressY, line1.c_str());
-  if (line2.length() > 0) {
+  if (!line2.isEmpty()) {
     u8g2.drawStr(2, addressY + 10, line2.c_str());
   }
-
-  int tw = u8g2.getStrWidth(timeBuf);
-  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
 
   u8g2.sendBuffer();
 }
 
 void showRtcStatus(U8G2 &u8g2, unsigned long remainingSecs) {
-  char timeBuf[8];
-  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
-
-  RtcStatus status = rtcGetStatus();
-  String rtcNow = rtcGetCurrentTimeString();
-
-  const char *presentText = status.present ? "Yes" : "No";
-  const char *powerText   = status.powerLost ? "Yes" : "No";
-  const char *batteryText = status.lowBattery ? "Low" : "OK";
-  const char *sqwText     = status.sqwConfigured ? "Yes" : "No";
+  RtcStatus   status = rtcGetStatus();
+  String      rtcNow = rtcGetCurrentTimeString();
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tr);
-
-  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
-  u8g2.setDrawColor(0);
-  u8g2.drawStr(2, 8, "RTC Status");
-  u8g2.setDrawColor(1);
+  drawTitleBar(u8g2, "RTC Status", remainingSecs);
 
   u8g2.drawStr(2, 20, rtcNow.c_str());
-  u8g2.drawStr(2, 29, (String("Present:") + presentText).c_str());
-  u8g2.drawStr(2, 38, (String("LostPwr:") + powerText).c_str());
-  u8g2.drawStr(2, 47, (String("Battery:") + batteryText).c_str());
-  u8g2.drawStr(2, 56, (String("SQW 1Hz:") + sqwText).c_str());
-
-  String nowLine = "T:" + rtcNow;
-  if (u8g2.getStrWidth(nowLine.c_str()) > DISPLAY_WIDTH - 4) {
-    nowLine = rtcNow.substring(rtcNow.length() - 8);
-  }
-  //u8g2.drawStr(2, 56, nowLine.c_str());
-
-  int tw = u8g2.getStrWidth(timeBuf);
-  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
+  u8g2.drawStr(2, 29, (String("Present:") + (status.present     ? "Yes" : "No")).c_str());
+  u8g2.drawStr(2, 38, (String("LostPwr:") + (status.powerLost   ? "Yes" : "No")).c_str());
+  u8g2.drawStr(2, 47, (String("Battery:") + (status.lowBattery  ? "Low" : "OK")).c_str());
+  u8g2.drawStr(2, 56, (String("SQW 1Hz:") + (status.sqwConfigured ? "Yes" : "No")).c_str());
 
   u8g2.sendBuffer();
 }
 
 void showErrorMessage(U8G2 &u8g2, const String &message, unsigned long remainingSecs) {
-  char timeBuf[8];
-  snprintf(timeBuf, sizeof(timeBuf), "%lus", remainingSecs);
-
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tr);
-
-  u8g2.drawBox(0, 0, DISPLAY_WIDTH, 10);
-  u8g2.setDrawColor(0);
-  u8g2.drawStr(2, 8, "Sensor Error");
-  u8g2.setDrawColor(1);
+  drawTitleBar(u8g2, "Sensor Error", remainingSecs);
 
   u8g2.drawStr(2, 24, "Read failed:");
   u8g2.drawStr(2, 38, message.c_str());
-
-  int tw = u8g2.getStrWidth(timeBuf);
-  u8g2.drawStr(DISPLAY_WIDTH - tw - 1, MINMAX_BASELINE_Y, timeBuf);
 
   u8g2.sendBuffer();
 }

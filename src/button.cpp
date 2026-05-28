@@ -1,78 +1,33 @@
 #include "button.h"
-#include "graph.h"
-#include "i2c_scanner.h"
 #include "hardware.h"
-#include <OneButton.h>  // mathertel/OneButton
+#include <OneButton.h>
 #include <Arduino.h>
 
-// Pin 23, active-low, internal pull-up enabled.
 static OneButton btn1(Hardware::Pins::BUTTON_1, true, true);
-
-// Pin 19, active-low, internal pull-up enabled.
 static OneButton btn2(Hardware::Pins::BUTTON_2, true, true);
 
-static volatile bool splashPending = false;
-static volatile bool menuPending = false;
-static volatile bool networkInfoPending = false;
-static volatile bool i2cScanPending = false;
-static volatile bool rtcStatusPending = false;
-static volatile bool histogramTogglePending = false;
-static volatile bool panelDataResetPending = false;
+constexpr int EVENT_QUEUE_CAPACITY = 8;
+static volatile ButtonEvent eventQueue[EVENT_QUEUE_CAPACITY];
+static volatile int eventHead = 0;
+static volatile int eventTail = 0;
 
-bool buttonSplashPending() {
-    return splashPending;
+static void enqueueEvent(ButtonEvent evt) {
+    int next = (eventTail + 1) % EVENT_QUEUE_CAPACITY;
+    if (next != eventHead) {
+        eventQueue[eventTail] = evt;
+        eventTail = next;
+    }
 }
 
-void buttonClearSplashPending() {
-    splashPending = false;
+bool buttonHasEvent() {
+    return eventHead != eventTail;
 }
 
-bool buttonMenuPending() {
-    return menuPending;
-}
-
-void buttonClearMenuPending() {
-    menuPending = false;
-}
-
-bool buttonNetworkInfoPending() {
-    return networkInfoPending;
-}
-
-void buttonClearNetworkInfoPending() {
-    networkInfoPending = false;
-}
-
-bool buttonI2cScanPending() {
-    return i2cScanPending;
-}
-
-void buttonClearI2cScanPending() {
-    i2cScanPending = false;
-}
-
-bool buttonRtcStatusPending() {
-    return rtcStatusPending;
-}
-
-void buttonClearRtcStatusPending() {
-    rtcStatusPending = false;
-}
-
-bool buttonHistogramTogglePending() {
-    return histogramTogglePending;
-}
-
-void buttonClearHistogramTogglePending() {
-    histogramTogglePending = false;
-}
-
-bool buttonPanelDataResetPending() {
-    return panelDataResetPending;
-}
-
-void buttonClearPanelDataResetPending() {
-    panelDataResetPending = false;
+ButtonEvent buttonNextEvent() {
+    if (eventHead == eventTail) return ButtonEvent::NONE;
+    ButtonEvent evt = eventQueue[eventHead];
+    eventHead = (eventHead + 1) % EVENT_QUEUE_CAPACITY;
+    return evt;
 }
 
 static void blink(unsigned int ms) {
@@ -82,49 +37,49 @@ static void blink(unsigned int ms) {
 }
 
 static void onBtn1Click() {
-    Serial.println("[BTN1] Single press detected");
+    Serial.println("[BTN1] Single press");
     blink(200);
-    histogramTogglePending = true;
+    enqueueEvent(ButtonEvent::HISTOGRAM_TOGGLE);
 }
 
 static void onBtn1DoubleClick() {
-    Serial.println("[BTN1] Double click detected");
+    Serial.println("[BTN1] Double click");
     blink(200);
-    panelDataResetPending = true;
+    enqueueEvent(ButtonEvent::PANEL_DATA_RESET);
 }
 
 static void onBtn1MultiClick() {
-    Serial.println("[BTN1] Triple click detected");
+    Serial.println("[BTN1] Triple click");
     blink(200);
 }
 
 static void onBtn1LongPressStart() {
-    Serial.println("[BTN1] Long press detected");
+    Serial.println("[BTN1] Long press");
     blink(200);
-    menuPending = true;
+    enqueueEvent(ButtonEvent::MENU);
 }
+
 static void onBtn2Click() {
-    Serial.println("[BTN2] Single click detected");
+    Serial.println("[BTN2] Single click");
     blink(200);
-    networkInfoPending = true;
+    enqueueEvent(ButtonEvent::NETWORK_INFO);
 }
 
 static void onBtn2DoubleClick() {
-    Serial.println("[BTN2] Double click detected");
+    Serial.println("[BTN2] Double click");
     blink(200);
-    i2cScanPending = true;
-    // TODO: define action for button 2 double-click
+    enqueueEvent(ButtonEvent::I2C_SCAN);
 }
 
 static void onBtn2MultiClick() {
-    Serial.println("[BTN2] Triple click detected");
+    Serial.println("[BTN2] Triple click");
     blink(200);
 }
 
 static void onBtn2LongPressStart() {
-    Serial.println("[BTN2] Long press detected");
+    Serial.println("[BTN2] Long press");
     blink(200);
-    rtcStatusPending = true;
+    enqueueEvent(ButtonEvent::RTC_STATUS);
 }
 
 void buttonBegin() {

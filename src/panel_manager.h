@@ -1,7 +1,17 @@
 #pragma once
 #include <Arduino.h>
 #include <U8g2lib.h>
-#include "display.h"
+
+enum class Panel {
+  GRAPH,
+  HISTOGRAM,
+  SPLASH,
+  MENU,
+  NETWORK_INFO,
+  I2C_SCAN,
+  RTC_STATUS,
+  ERROR_MESSAGE,
+};
 
 struct PanelPayload {
   String networkSsid;
@@ -9,54 +19,50 @@ struct PanelPayload {
   String errorMessage;
 
   bool operator==(const PanelPayload &other) const {
-    return networkSsid == other.networkSsid &&
-           networkIp == other.networkIp &&
+    return networkSsid  == other.networkSsid  &&
+           networkIp    == other.networkIp    &&
            errorMessage == other.errorMessage;
   }
 };
 
-struct PanelRequest {
-  Panel panel;
-  unsigned long durationMs;
-  PanelPayload data;
-};
-
 struct PanelManager {
-  Panel currentPanel;
-  Panel prevPanel;
-  Panel primaryPanel;
-  unsigned long panelUntil;
-  unsigned long lastRender;
-  PanelPayload panelData;
-  PanelRequest queuedPanels[6];
-  uint8_t queuedPanelCount;
-
-  // Panel-specific timings
-  unsigned long splashMs;
-  unsigned long menuMs;
-  unsigned long networkInfoMs;
-  unsigned long i2cScanMs;
-  unsigned long rtcStatusMs;
-  unsigned long errorMessageMs;
-
   PanelManager();
 
+  // Request a panel. Duration is determined internally per panel type.
+  // Returns true if the panel became active immediately.
+  bool setPanel(Panel panel, const PanelPayload &data, unsigned long now);
 
-  // Set/update panel based on priority; returns true if panel changed
-  bool setPanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now);
-
-  // Check if panel has expired; if so, advance to next panel
+  // Advance to the next panel if the current one has expired.
   bool checkExpiration(unsigned long now);
 
-  // Render current panel; respects change flags and refresh intervals
+  // Render the current panel; respects change detection and 250 ms refresh rate.
   void render(U8G2 &u8g2, unsigned long now);
 
-  // Allow queueing panels from outside
-  bool enqueuePanelBack(Panel panel, unsigned long durationMs, const PanelPayload &data);
-  bool enqueuePanelFront(Panel panel, unsigned long durationMs, const PanelPayload &data);
+  Panel getCurrentPanel() const { return currentPanel; }
+  Panel getPrimaryPanel() const { return primaryPanel; }
+  bool  panelChanged()    const { return currentPanel != prevPanel; }
 
  private:
+  struct PanelRequest {
+    Panel panel;
+    unsigned long durationMs;
+    PanelPayload data;
+  };
+
+  Panel         currentPanel;
+  Panel         prevPanel;
+  Panel         primaryPanel;
+  unsigned long panelUntil;
+  unsigned long lastRender;
+  PanelPayload  panelData;
+  PanelRequest  queuedPanels[6];
+  uint8_t       queuedPanelCount;
+
   void activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now);
+  bool enqueuePanelBack(Panel panel, unsigned long durationMs, const PanelPayload &data);
+  bool enqueuePanelFront(Panel panel, unsigned long durationMs, const PanelPayload &data);
   bool dequeuePanel(PanelRequest &request);
-  static int panelPriority(Panel panel);
+
+  static int           panelPriority(Panel panel);
+  static unsigned long panelDuration(Panel panel);
 };

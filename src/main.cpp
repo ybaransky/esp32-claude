@@ -1,28 +1,26 @@
 #include <Arduino.h>
-#include <math.h>
-#include "graph.h"
 #include "display.h"
+#include "graph.h"
 #include "config.h"
 #include "web.h"
 #include "button.h"
 #include "sensors.h"
 #include "histogram.h"
-#include "i2c_scanner.h"
 #include "panel_manager.h"
 #include "rtc_ds3231.h"
 #include "hardware.h"
 
-constexpr unsigned long READ_INTERVAL_SECONDS = 1;
+constexpr unsigned long READ_INTERVAL_MS = 1000;
 
 // ---------------------------------------------------------------------------
 // Application state
 // ---------------------------------------------------------------------------
 
 struct AppState {
-  PanelManager      panelMgr;
-  SensorReadings    lastReadings        = {};
-  bool              splashShown          = false;
-  unsigned long     lastSensorReadMs     = 0;
+  PanelManager  panelMgr;
+  SensorReadings lastReadings       = {};
+  bool           splashShown        = false;
+  unsigned long  lastSensorReadMs   = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -34,63 +32,69 @@ static void updateAllData(const SensorReadings &readings) {
   histogramUpdateData(readings.deltaF);
   graphUpdateData(readings.deltaF);
   webUpdate(readings);
-  Serial.printf("BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n", readings.bmpF, readings.shtF, readings.deltaF);
+  Serial.printf("BMP: %.2f F  SHT: %.2f F  Diff: %+.2f F\n",
+                readings.bmpF, readings.shtF, readings.deltaF);
 }
 
 // Returns true if a base-view redraw should be forced.
 static bool processButtonEvents(AppState &state, unsigned long now) {
   bool forceRedraw = false;
 
-  if (buttonSplashPending()) {
-    buttonClearSplashPending();
-    state.panelMgr.setPanel(Panel::SPLASH, state.panelMgr.splashMs, PanelPayload(), now);
-  }
+  while (buttonHasEvent()) {
+    switch (buttonNextEvent()) {
+      case ButtonEvent::MENU:
+        if (state.panelMgr.getCurrentPanel() == Panel::HISTOGRAM) {
+          histogramRecenterOnPeak();
+          forceRedraw = true;
+        } else {
+          state.panelMgr.setPanel(Panel::MENU, PanelPayload(), now);
+        }
+        break;
 
-  if (buttonMenuPending()) {
-    buttonClearMenuPending();
-    state.panelMgr.setPanel(Panel::MENU, state.panelMgr.menuMs, PanelPayload(), now);
-  }
+      case ButtonEvent::I2C_SCAN:
+        i2cScan();
+        state.panelMgr.setPanel(Panel::I2C_SCAN, PanelPayload(), now);
+        break;
 
-  if (buttonI2cScanPending()) {
-    buttonClearI2cScanPending();
-    scanI2C();
-    state.panelMgr.setPanel(Panel::I2C_SCAN, state.panelMgr.i2cScanMs, PanelPayload(), now);
-  }
+      case ButtonEvent::RTC_STATUS:
+        state.panelMgr.setPanel(Panel::RTC_STATUS, PanelPayload(), now);
+        break;
 
-  if (buttonRtcStatusPending()) {
-    buttonClearRtcStatusPending();
-    state.panelMgr.setPanel(Panel::RTC_STATUS, state.panelMgr.rtcStatusMs, PanelPayload(), now);
-  }
+      case ButtonEvent::NETWORK_INFO: {
+        PanelPayload payload;
+        networkGetInfo(payload.networkSsid, payload.networkIp);
+        state.panelMgr.setPanel(Panel::NETWORK_INFO, payload, now);
+        break;
+      }
 
-  if (buttonNetworkInfoPending()) {
-    PanelPayload panelData;
-    networkGetInfo(panelData.networkSsid, panelData.networkIp);
-    buttonClearNetworkInfoPending();
-    state.panelMgr.setPanel(Panel::NETWORK_INFO, state.panelMgr.networkInfoMs, panelData, now);
-  }
+      case ButtonEvent::HISTOGRAM_TOGGLE: {
+        Panel next = (state.panelMgr.getPrimaryPanel() == Panel::GRAPH)
+                   ? Panel::HISTOGRAM : Panel::GRAPH;
+        state.panelMgr.setPanel(next, PanelPayload(), now);
+        Serial.printf("[BTN1] Base view: %s\n",
+                      next == Panel::HISTOGRAM ? "Histogram" : "Graph");
+        forceRedraw = true;
+        break;
+      }
 
-  if (buttonHistogramTogglePending()) {
-    buttonClearHistogramTogglePending();
-    Panel nextBasePanel = (state.panelMgr.primaryPanel == Panel::GRAPH)
-      ? Panel::HISTOGRAM
-      : Panel::GRAPH;
-    state.panelMgr.setPanel(nextBasePanel, 0, PanelPayload(), now);
-    Serial.printf("[BTN1] Base view: %s\n", nextBasePanel == Panel::HISTOGRAM ? "Histogram" : "Graph");
-    forceRedraw = true;
-  }
+      case ButtonEvent::PANEL_DATA_RESET: {
+        Panel current = state.panelMgr.getCurrentPanel();
+        if (current == Panel::GRAPH) {
+          graphResetBounds();
+          Serial.println("[BTN1] Graph bounds reset");
+        } else if (current == Panel::HISTOGRAM) {
+          histogramReset();
+          Serial.println("[BTN1] Histogram reset");
+        } else {
+          Serial.println("[BTN1] Reset ignored: not on graph or histogram panel");
+        }
+        forceRedraw = true;
+        break;
+      }
 
-  if (buttonPanelDataResetPending()) {
-    buttonClearPanelDataResetPending();
-    if (state.panelMgr.currentPanel == Panel::GRAPH) {
-      graphResetBounds();
-      Serial.println("[BTN1] Graph bounds reset");
-    } else if (state.panelMgr.currentPanel == Panel::HISTOGRAM) {
-      histogramReset();
-      Serial.println("[BTN1] Histogram reset");
-    } else {
-      Serial.println("[BTN1] Reset ignored: not on graph or histogram panel");
+      default:
+        break;
     }
-    forceRedraw = true;
   }
 
   return forceRedraw;
@@ -98,9 +102,7 @@ static bool processButtonEvents(AppState &state, unsigned long now) {
 
 // Returns true if fresh sensor data was successfully read.
 static bool sensorsUpdate(AppState &state, unsigned long now) {
-  if (now - state.lastSensorReadMs < READ_INTERVAL_SECONDS * 1000UL) {
-    return false;
-  }
+  if (now - state.lastSensorReadMs < READ_INTERVAL_MS) return false;
 
   state.lastReadings    = readSensors();
   state.lastSensorReadMs = now;
@@ -109,12 +111,11 @@ static bool sensorsUpdate(AppState &state, unsigned long now) {
   bool shtError = isnan(state.lastReadings.shtF);
 
   if (bmpError || shtError) {
-    String nextError = (bmpError && shtError) ? "BMP and SHT"
-                     : bmpError               ? "BMP"
-                                              : "SHT";
-    PanelPayload panelData;
-    panelData.errorMessage = nextError;
-    state.panelMgr.setPanel(Panel::ERROR_MESSAGE, state.panelMgr.errorMessageMs, panelData, now);
+    PanelPayload payload;
+    payload.errorMessage = (bmpError && shtError) ? "BMP and SHT"
+                         : bmpError               ? "BMP"
+                                                  : "SHT";
+    state.panelMgr.setPanel(Panel::ERROR_MESSAGE, payload, now);
     return false;
   }
 
@@ -126,14 +127,12 @@ static void renderFrame(AppState &state, bool freshData, bool forceRedraw, unsig
   state.panelMgr.checkExpiration(now);
 
   U8G2 &display = displayDevice();
+  Panel current = state.panelMgr.getCurrentPanel();
 
-  if (state.panelMgr.currentPanel == Panel::GRAPH) {
-    if (state.panelMgr.currentPanel != state.panelMgr.prevPanel || freshData || forceRedraw) {
-      showGraph(display, state.lastReadings);
-    }
-  } else if (state.panelMgr.currentPanel == Panel::HISTOGRAM) {
-    if (state.panelMgr.currentPanel != state.panelMgr.prevPanel || freshData || forceRedraw) {
-      showHistogram(display, state.lastReadings);
+  if (current == Panel::GRAPH || current == Panel::HISTOGRAM) {
+    if (state.panelMgr.panelChanged() || freshData || forceRedraw) {
+      if (current == Panel::GRAPH) showGraph(display, state.lastReadings);
+      else                         showHistogram(display, state.lastReadings);
     }
   } else {
     state.panelMgr.render(display, now);
@@ -153,11 +152,9 @@ void setup() {
   sensorsBegin(Hardware::Pins::I2C_SDA, Hardware::Pins::I2C_SCL);
 
   if (!rtcBegin()) {
-    RtcStatus status = rtcGetStatus();
-    Serial.printf("[RTC] Init failed: %s\n", status.error.c_str());
+    Serial.printf("[RTC] Init failed: %s\n", rtcGetStatus().error.c_str());
   }
-  // all hardware started
-  scanI2C();
+  i2cScan();
 
   ApConfig cfg = loadApConfig();
   webBegin(cfg.ssid.c_str(), cfg.password.c_str());
@@ -170,7 +167,7 @@ void loop() {
   unsigned long now = millis();
 
   if (!state.splashShown) {
-    state.panelMgr.setPanel(Panel::SPLASH, state.panelMgr.splashMs, PanelPayload(), now);
+    state.panelMgr.setPanel(Panel::SPLASH, PanelPayload(), now);
     state.splashShown = true;
   }
 

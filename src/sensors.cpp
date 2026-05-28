@@ -1,5 +1,4 @@
 #include "sensors.h"
-#include "i2c_scanner.h"
 #include "hardware.h"
 #include <Wire.h>
 #include <Adafruit_BMP280.h>

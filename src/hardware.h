@@ -20,3 +20,15 @@ namespace Hardware {
 		constexpr uint8_t DS3231 = 0x68;
 	}  // namespace I2CAddress
 }  // namespace Hardware
+
+// ---------------------------------------------------------------------------
+// I2C bus scanner
+// ---------------------------------------------------------------------------
+
+struct I2CScanResult {
+	const uint8_t *addresses;
+	size_t count;
+};
+
+void          i2cScan();
+I2CScanResult i2cGetLastScanResult();

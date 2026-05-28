@@ -45,6 +45,41 @@ void histogramUpdateData(float data) {
   }
 }
 
+void histogramRecenterOnPeak() {
+  if (!initialized || sampleCount == 0) return;
+
+  int peakIndex = HISTOGRAM_CENTER_INDEX;
+  int peakCount = 0;
+  for (int i = 0; i < HISTOGRAM_BIN_COUNT; ++i) {
+    if (histogramBins[i] > peakCount) {
+      peakCount = histogramBins[i];
+      peakIndex = i;
+    }
+  }
+
+  if (peakIndex == HISTOGRAM_CENTER_INDEX) return;
+
+  // Shift all bins so the peak lands at HISTOGRAM_CENTER_INDEX.
+  const int shift = peakIndex - HISTOGRAM_CENTER_INDEX;
+  int newBins[HISTOGRAM_BIN_COUNT] = {};
+  for (int i = 0; i < HISTOGRAM_BIN_COUNT; ++i) {
+    const int dest = i - shift;
+    if (dest >= 0 && dest < HISTOGRAM_BIN_COUNT) {
+      newBins[dest] = histogramBins[i];
+    }
+  }
+  memcpy(histogramBins, newBins, sizeof(histogramBins));
+
+  // The new center is the peak's former scaled value.
+  centerScaledValue += shift;
+  // Offsets are relative to center, so they shrink by the same shift.
+  minScaledOffset -= shift;
+  maxScaledOffset -= shift;
+
+  Serial.printf("[HIST] Recentered on peak at %.2f\n",
+                static_cast<float>(centerScaledValue) * HISTOGRAM_BIN_SIZE_F);
+}
+
 void histogramReset() {
   memset(histogramBins, 0, sizeof(histogramBins));
   centerScaledValue   = 0;

@@ -13,6 +13,7 @@ constexpr float   HISTOGRAM_BIN_SIZE_F     = 1.0f / HISTOGRAM_VALUE_SCALE;
 
 void histogramUpdateData(float data);
 void histogramReset();
+void histogramRecenterOnPeak();
 
 const int  *histogramGetBins();
 int         histogramGetBinCount();

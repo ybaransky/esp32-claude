@@ -1,18 +1,16 @@
 #pragma once
 
+enum class ButtonEvent {
+  NONE,
+  MENU,
+  NETWORK_INFO,
+  I2C_SCAN,
+  RTC_STATUS,
+  HISTOGRAM_TOGGLE,
+  PANEL_DATA_RESET,
+};
+
 void buttonBegin();
 void buttonTick();
-bool buttonSplashPending();
-void buttonClearSplashPending();
-bool buttonMenuPending();
-void buttonClearMenuPending();
-bool buttonNetworkInfoPending();
-void buttonClearNetworkInfoPending();
-bool buttonI2cScanPending();
-void buttonClearI2cScanPending();
-bool buttonRtcStatusPending();
-void buttonClearRtcStatusPending();
-bool buttonHistogramTogglePending();
-void buttonClearHistogramTogglePending();
-bool buttonPanelDataResetPending();
-void buttonClearPanelDataResetPending();
+bool buttonHasEvent();
+ButtonEvent buttonNextEvent();
