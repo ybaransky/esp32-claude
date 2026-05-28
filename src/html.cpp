@@ -42,11 +42,17 @@ const char INDEX_HTML[] = R"rawliteral(
   </div>
   <script>
     const diffHistory = [];
-    const maxPoints = 90;
     const samplePeriodSec = 2;
-    const histogramBinCount = 451;
-    const histogramScale = 100;
-    let histogramLatchedMax = 0;
+    let histogramData = {
+      bins: [],
+      center: 0,
+      halfRange: 1,
+      scale: 100,
+      latchedMax: 1,
+      sampleCount: 0,
+    };
+    let lastGraphCount = 0;
+    let lastHistSampleCount = 0;
 
     function fmt(v, sign) {
       return (sign && v >= 0 ? '+' : '') + v.toFixed(2);
@@ -172,43 +178,19 @@ const char INDEX_HTML[] = R"rawliteral(
       ctx.lineTo(right, bottom);
       ctx.stroke();
 
-      if (diffHistory.length === 0) {
+      if (!histogramData.bins || histogramData.bins.length === 0) {
         return;
       }
 
-      const scaled = new Array(diffHistory.length);
-      let sumScaled = 0;
-      let minScaled = Math.round(diffHistory[0] * histogramScale);
-      let maxScaled = minScaled;
-
-      for (let i = 0; i < diffHistory.length; i++) {
-        const v = Math.round(diffHistory[i] * histogramScale);
-        scaled[i] = v;
-        sumScaled += v;
-        minScaled = Math.min(minScaled, v);
-        maxScaled = Math.max(maxScaled, v);
-      }
-
-      const meanScaled = sumScaled / scaled.length;
-      const halfRangeScaled = Math.max(1, Math.max(Math.abs(meanScaled - minScaled), Math.abs(maxScaled - meanScaled)));
-
-      const bins = new Array(histogramBinCount).fill(0);
-      const minDomain = meanScaled - halfRangeScaled;
-      const span = 2 * halfRangeScaled;
-
-      for (let i = 0; i < scaled.length; i++) {
-        const normalized = (scaled[i] - minDomain) / span;
-        let idx = Math.round(normalized * (histogramBinCount - 1));
-        idx = Math.max(0, Math.min(histogramBinCount - 1, idx));
-        bins[idx]++;
-      }
+      const bins = histogramData.bins;
+      const binCount = bins.length;
 
       const plotWidth = right - left + 1;
       const bucketCounts = new Array(plotWidth).fill(0);
       let maxBucketCount = 0;
       for (let col = 0; col < plotWidth; col++) {
-        const start = Math.floor((col * histogramBinCount) / plotWidth);
-        const end = Math.floor(((col + 1) * histogramBinCount) / plotWidth);
+        const start = Math.floor((col * binCount) / plotWidth);
+        const end = Math.floor(((col + 1) * binCount) / plotWidth);
         let count = 0;
         for (let i = start; i < end; i++) {
           count += bins[i];
@@ -217,8 +199,7 @@ const char INDEX_HTML[] = R"rawliteral(
         maxBucketCount = Math.max(maxBucketCount, count);
       }
 
-      histogramLatchedMax = Math.max(histogramLatchedMax, maxBucketCount);
-      const yMax = Math.max(1, histogramLatchedMax);
+      const yMax = Math.max(1, histogramData.latchedMax, maxBucketCount);
 
       ctx.fillStyle = '#666';
       ctx.font = '10px sans-serif';
@@ -247,9 +228,10 @@ const char INDEX_HTML[] = R"rawliteral(
       }
       ctx.stroke();
 
-      const xMin = (meanScaled - halfRangeScaled) / histogramScale;
-      const xMid = meanScaled / histogramScale;
-      const xMax = (meanScaled + halfRangeScaled) / histogramScale;
+      const halfRangeF = Math.max(1, histogramData.halfRange) / Math.max(1, histogramData.scale);
+      const xMin = histogramData.center - halfRangeF;
+      const xMid = histogramData.center;
+      const xMax = histogramData.center + halfRangeF;
       ctx.fillStyle = '#666';
       ctx.font = '9px sans-serif';
       ctx.textAlign = 'center';
@@ -259,23 +241,102 @@ const char INDEX_HTML[] = R"rawliteral(
       ctx.textAlign = 'left';
     }
 
-    async function refresh() {
-      try {
-        const d = await fetch('/api/sensors').then(r => r.json());
-        document.getElementById('bmp').textContent  = fmt(d.bmp);
-        document.getElementById('sht').textContent  = fmt(d.sht);
-        document.getElementById('diff').textContent = fmt(d.diff, true);
+    function applyState(state) {
+      document.getElementById('bmp').textContent  = fmt(state.bmp);
+      document.getElementById('sht').textContent  = fmt(state.sht);
+      document.getElementById('diff').textContent = fmt(state.diff, true);
 
-        diffHistory.push(d.diff);
-        if (diffHistory.length > maxPoints) {
+      const history = (state.graph && Array.isArray(state.graph.history)) ? state.graph.history : [];
+      diffHistory.length = 0;
+      for (let i = 0; i < history.length; i++) {
+        diffHistory.push(Number(history[i]));
+      }
+
+      const h = state.histogram || {};
+      histogramData = {
+        bins: Array.isArray(h.bins) ? h.bins : [],
+        center: Number(h.center || 0),
+        halfRange: Number(h.halfRange || 1),
+        scale: Number(h.scale || 100),
+        latchedMax: Number(h.latchedMax || 1),
+        sampleCount: Number(h.sampleCount || 0),
+      };
+
+      lastGraphCount = Number((state.graph && state.graph.count) || history.length || 0);
+      lastHistSampleCount = histogramData.sampleCount;
+
+      drawDiffChart();
+      drawHistogramChart();
+    }
+
+    function applyLive(live) {
+      const bmp = Number(live.bmp);
+      const sht = Number(live.sht);
+      const diff = Number(live.diff);
+      const graphCount = Number(live.graphCount || 0);
+      const histSampleCount = Number(live.histSampleCount || 0);
+
+      document.getElementById('bmp').textContent  = fmt(bmp);
+      document.getElementById('sht').textContent  = fmt(sht);
+      document.getElementById('diff').textContent = fmt(diff, true);
+
+      // Keep low-bandwidth incremental updates only if we received exactly one new sample.
+      if (graphCount === lastGraphCount + 1 && histSampleCount === lastHistSampleCount + 1) {
+        diffHistory.push(diff);
+        while (diffHistory.length > graphCount) {
           diffHistory.shift();
         }
+
+        if (histogramData.bins && histogramData.bins.length > 0) {
+          const centerIndex = Math.floor((histogramData.bins.length - 1) / 2);
+          const scaledValue = Math.round(diff * histogramData.scale);
+          const centerScaledValue = Math.round(histogramData.center * histogramData.scale);
+          const offset = scaledValue - centerScaledValue;
+          const index = centerIndex + offset;
+
+          if (index >= 0 && index < histogramData.bins.length) {
+            histogramData.bins[index] += 1;
+            histogramData.sampleCount = histSampleCount;
+            histogramData.halfRange = Math.max(histogramData.halfRange, Math.abs(offset));
+            histogramData.latchedMax = Math.max(histogramData.latchedMax, histogramData.bins[index]);
+          } else {
+            return false;
+          }
+        }
+
+        lastGraphCount = graphCount;
+        lastHistSampleCount = histSampleCount;
         drawDiffChart();
         drawHistogramChart();
+        return true;
+      }
+
+      // Any gap, reset, or recenter should trigger a full refresh.
+      return false;
+    }
+
+    async function refreshFullState() {
+      const state = await fetch('/api/state').then(r => r.json());
+      applyState(state);
+    }
+
+    async function refresh() {
+      try {
+        const live = await fetch('/api/live').then(r => r.json());
+        if (!applyLive(live)) {
+          await refreshFullState();
+        }
       } catch(e) {}
     }
-    refresh();
-    setInterval(refresh, 2000);
+
+    async function bootstrap() {
+      try {
+        await refreshFullState();
+      } catch (e) {}
+      setInterval(refresh, 2000);
+    }
+
+    bootstrap();
   </script>
 </body>
 </html>

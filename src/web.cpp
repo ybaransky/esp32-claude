@@ -1,5 +1,7 @@
 #include "web.h"
 #include "html.h"
+#include "graph.h"
+#include "histogram.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -68,6 +70,92 @@ static void handleApiDiff() {
     server.send(200, "application/json", buf);
 }
 
+static void handleApiLive() {
+    logRequest(200);
+    char buf[112];
+    snprintf(buf, sizeof(buf),
+             "{\"bmp\":%.2f,\"sht\":%.2f,\"diff\":%.2f,\"graphCount\":%d,\"histSampleCount\":%lu}",
+             lastSensorReading.bmpF,
+             lastSensorReading.shtF,
+             lastSensorReading.deltaF,
+             graphGetHistoryCount(),
+             static_cast<unsigned long>(histogramGetSampleCount()));
+    server.send(200, "application/json", buf);
+}
+
+static String buildGraphJson() {
+    const float *history = graphGetHistory();
+    const int count = graphGetHistoryCount();
+
+    String json;
+    json.reserve(1800);
+    json += "{\"count\":";
+    json += count;
+    json += ",\"history\":[";
+    for (int i = 0; i < count; ++i) {
+        if (i > 0) json += ',';
+        json += String(history[i], 2);
+    }
+    json += "]}";
+    return json;
+}
+
+static String buildHistogramJson() {
+    const int *bins = histogramGetBins();
+    const int binCount = histogramGetBinCount();
+
+    String json;
+    json.reserve(12000);
+    json += "{\"center\":";
+    json += String(histogramGetCenterValueF(), 2);
+    json += ",\"halfRange\":";
+    json += histogramGetHalfRange();
+    json += ",\"scale\":";
+    json += HISTOGRAM_VALUE_SCALE;
+    json += ",\"sampleCount\":";
+    json += static_cast<unsigned long>(histogramGetSampleCount());
+    json += ",\"latchedMax\":";
+    json += histogramGetLatchedMaxFrequency();
+    json += ",\"bins\":[";
+
+    for (int i = 0; i < binCount; ++i) {
+        if (i > 0) json += ',';
+        json += bins[i];
+    }
+    json += "]}";
+    return json;
+}
+
+static void handleApiGraph() {
+    logRequest(200);
+    server.send(200, "application/json", buildGraphJson());
+}
+
+static void handleApiHistogram() {
+    logRequest(200);
+    server.send(200, "application/json", buildHistogramJson());
+}
+
+static void handleApiState() {
+    logRequest(200);
+
+    String json;
+    json.reserve(15000);
+    json += "{\"bmp\":";
+    json += String(lastSensorReading.bmpF, 2);
+    json += ",\"sht\":";
+    json += String(lastSensorReading.shtF, 2);
+    json += ",\"diff\":";
+    json += String(lastSensorReading.deltaF, 2);
+    json += ",\"graph\":";
+    json += buildGraphJson();
+    json += ",\"histogram\":";
+    json += buildHistogramJson();
+    json += '}';
+
+    server.send(200, "application/json", json);
+}
+
 static void handleCaptiveRedirect() {
     logRequest(302);
     server.sendHeader("Location", "http://192.168.4.1/", true);
@@ -91,6 +179,10 @@ void webBegin(const char *ssid, const char *password) {
     server.on("/api/bmp",     handleApiBmp);
     server.on("/api/sht",     handleApiSht);
     server.on("/api/diff",    handleApiDiff);
+    server.on("/api/live",    handleApiLive);
+    server.on("/api/graph",   handleApiGraph);
+    server.on("/api/histogram", handleApiHistogram);
+    server.on("/api/state",   handleApiState);
     server.onNotFound(handleCaptiveRedirect);
     server.begin();
     Serial.println("HTTP server started");
