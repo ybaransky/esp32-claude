@@ -197,19 +197,21 @@ static void drawHistogramXAxis(U8G2 &u8g2, int axisLeftX, int axisCenterX,
 }
 
 static void drawHistogramInfoBox(U8G2 &u8g2, int x, int y, int width,
-                                 uint32_t sampleCount, float currentDiff,
-                                 float maxCountDiff) {
-  char sampleBuf[16], currentDiffBuf[16], maxCountDiffBuf[16];
-  snprintf(sampleBuf,      sizeof(sampleBuf),      "N=%lu",  static_cast<unsigned long>(sampleCount));
-  snprintf(currentDiffBuf, sizeof(currentDiffBuf), "%.2f",   currentDiff);
-  snprintf(maxCountDiffBuf,sizeof(maxCountDiffBuf),"%.2f",   maxCountDiff);
+                                 uint32_t sampleCount, int maxFrequency,
+                                 float currentDiff, float maxCountDiff) {
+  char sampleBuf[16], maxFreqBuf[16], currentDiffBuf[16], maxCountDiffBuf[16];
+  snprintf(sampleBuf,      sizeof(sampleBuf),      "N=%lu",   static_cast<unsigned long>(sampleCount));
+  snprintf(maxFreqBuf,     sizeof(maxFreqBuf),     "M=%d",    maxFrequency);
+  snprintf(currentDiffBuf,  sizeof(currentDiffBuf), "%.2f",    currentDiff);
+  snprintf(maxCountDiffBuf, sizeof(maxCountDiffBuf),"%.2f",    maxCountDiff);
 
   u8g2.setDrawColor(0);
-  u8g2.drawBox(x - 1, GRAPH_TOP, width + 2, 24);
+  u8g2.drawBox(x - 1, GRAPH_TOP, width + 2, 32);
   u8g2.setDrawColor(1);
   u8g2.drawStr(x, y,      sampleBuf);
-  u8g2.drawStr(x, y +  8, currentDiffBuf);
-  u8g2.drawStr(x, y + 16, maxCountDiffBuf);
+  u8g2.drawStr(x, y +  8, maxFreqBuf);
+  u8g2.drawStr(x, y + 16, currentDiffBuf);
+  u8g2.drawStr(x, y + 24, maxCountDiffBuf);
 }
 
 static void drawHistogramBars(U8G2 &u8g2, const int *buckets, int count,
@@ -253,8 +255,8 @@ void showHistogram(U8G2 &u8g2, const SensorReadings &readings) {
   if (plotWidth > GRAPH_WIDTH) plotWidth = GRAPH_WIDTH;
   if (plotWidth < 1)           plotWidth = 1;
 
-  // Info box width (right-side overlay): widest of the three stat strings
-  char currentDiffBuf[16], maxCountDiffBuf[16];
+  // Info box width (right-side overlay): widest of the stat strings
+  char sampleBuf[16], maxFreqBuf[16], currentDiffBuf[16], maxCountDiffBuf[16];
   const int maxBinIndex = [&]() {
     int best = HISTOGRAM_CENTER_INDEX, bestCount = 0;
     for (int i = 0; i < HISTOGRAM_BIN_COUNT; ++i) {
@@ -264,14 +266,15 @@ void showHistogram(U8G2 &u8g2, const SensorReadings &readings) {
   }();
   const float maxCountDiffValue = centerValue +
     static_cast<float>(maxBinIndex - HISTOGRAM_CENTER_INDEX) * HISTOGRAM_BIN_SIZE_F;
+  snprintf(sampleBuf,      sizeof(sampleBuf),      "N=%lu",   static_cast<unsigned long>(sampleCount));
+  snprintf(maxFreqBuf,     sizeof(maxFreqBuf),     "M=%d",    yAxisMax);
   snprintf(currentDiffBuf,  sizeof(currentDiffBuf),  "%.2f", readings.deltaF);
   snprintf(maxCountDiffBuf, sizeof(maxCountDiffBuf), "%.2f", maxCountDiffValue);
 
-  char sampleBuf[16];
-  snprintf(sampleBuf, sizeof(sampleBuf), "N=%lu", static_cast<unsigned long>(sampleCount));
   int infoWidth = u8g2.getStrWidth(sampleBuf);
-  int w = u8g2.getStrWidth(currentDiffBuf);  if (w > infoWidth) infoWidth = w;
-      w = u8g2.getStrWidth(maxCountDiffBuf); if (w > infoWidth) infoWidth = w;
+  int w = u8g2.getStrWidth(maxFreqBuf);        if (w > infoWidth) infoWidth = w;
+      w = u8g2.getStrWidth(currentDiffBuf);    if (w > infoWidth) infoWidth = w;
+      w = u8g2.getStrWidth(maxCountDiffBuf);   if (w > infoWidth) infoWidth = w;
   const int infoX = DISPLAY_WIDTH - infoWidth - 1;
 
   // Build buckets: one pixel per bin when possible, aggregate otherwise
@@ -295,7 +298,7 @@ void showHistogram(U8G2 &u8g2, const SensorReadings &readings) {
   drawHistogramXAxis(u8g2, axisLeftX, axisCenterX, axisRightX,
                      leftValue, centerValue, rightValue);
   drawHistogramInfoBox(u8g2, infoX, GRAPH_TOP + 6, infoWidth,
-                       sampleCount, readings.deltaF, maxCountDiffValue);
+                       sampleCount, yAxisMax, readings.deltaF, maxCountDiffValue);
 
   if (yAxisMax > 0) {
     drawHistogramBars(u8g2, buckets, activePlotWidth, activePlotLeftX,
