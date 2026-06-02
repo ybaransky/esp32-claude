@@ -10,6 +10,8 @@ constexpr int BUTTON_EVENT_QUEUE_CAPACITY = 8;
 static volatile ButtonEvent eventQueue[BUTTON_EVENT_QUEUE_CAPACITY];
 static volatile int eventHead = 0;
 static volatile int eventTail = 0;
+static bool ledPulseActive = false;
+static unsigned long ledOffAtMs = 0;
 
 static void enqueueEvent(ButtonEvent evt) {
     int next = (eventTail + 1) % BUTTON_EVENT_QUEUE_CAPACITY;
@@ -30,60 +32,55 @@ ButtonEvent buttonNextEvent() {
     return evt;
 }
 
-static void blink(unsigned int ms) {
+static void startLedPulse(unsigned long durationMs) {
     digitalWrite(Hardware::Pins::INTERNAL_LED, HIGH);
-    delay(ms);
-    digitalWrite(Hardware::Pins::INTERNAL_LED, LOW);
+    ledPulseActive = true;
+    ledOffAtMs = millis() + durationMs;
+}
+
+static void handleButtonAction(const char *message, ButtonEvent event = ButtonEvent::NONE) {
+    Serial.println(message);
+    startLedPulse(200);
+    if (event != ButtonEvent::NONE) {
+        enqueueEvent(event);
+    }
 }
 
 static void onBtn1Click() {
-    Serial.println("[BTN1] Single press");
-    blink(200);
-    enqueueEvent(ButtonEvent::HISTOGRAM_TOGGLE);
+    handleButtonAction("[BTN1] Single press", ButtonEvent::HISTOGRAM_TOGGLE);
 }
 
 static void onBtn1DoubleClick() {
-    Serial.println("[BTN1] Double click");
-    blink(200);
-    enqueueEvent(ButtonEvent::PANEL_DATA_RESET);
+    handleButtonAction("[BTN1] Double click", ButtonEvent::PANEL_DATA_RESET);
 }
 
 static void onBtn1MultiClick() {
-    Serial.println("[BTN1] Triple click");
-    blink(200);
+    handleButtonAction("[BTN1] Triple click");
 }
 
 static void onBtn1LongPressStart() {
-    Serial.println("[BTN1] Long press");
-    blink(200);
-    enqueueEvent(ButtonEvent::MENU);
+    handleButtonAction("[BTN1] Long press", ButtonEvent::MENU);
 }
 
 static void onBtn2Click() {
-    Serial.println("[BTN2] Single click");
-    blink(200);
-    enqueueEvent(ButtonEvent::NETWORK_INFO);
+    handleButtonAction("[BTN2] Single click", ButtonEvent::NETWORK_INFO);
 }
 
 static void onBtn2DoubleClick() {
-    Serial.println("[BTN2] Double click");
-    blink(200);
-    enqueueEvent(ButtonEvent::I2C_SCAN);
+    handleButtonAction("[BTN2] Double click", ButtonEvent::I2C_SCAN);
 }
 
 static void onBtn2MultiClick() {
-    Serial.println("[BTN2] Triple click");
-    blink(200);
+    handleButtonAction("[BTN2] Triple click");
 }
 
 static void onBtn2LongPressStart() {
-    Serial.println("[BTN2] Long press");
-    blink(200);
-    enqueueEvent(ButtonEvent::RTC_STATUS);
+    handleButtonAction("[BTN2] Long press", ButtonEvent::RTC_STATUS);
 }
 
 void buttonBegin() {
     pinMode(Hardware::Pins::INTERNAL_LED, OUTPUT);
+    digitalWrite(Hardware::Pins::INTERNAL_LED, LOW);
 
     btn1.attachClick(onBtn1Click);
     btn1.attachDoubleClick(onBtn1DoubleClick);
@@ -99,4 +96,11 @@ void buttonBegin() {
 void buttonTick() {
     btn1.tick();
     btn2.tick();
+}
+
+void buttonLedTick(unsigned long now) {
+    if (!ledPulseActive || static_cast<long>(now - ledOffAtMs) < 0) return;
+
+    digitalWrite(Hardware::Pins::INTERNAL_LED, LOW);
+    ledPulseActive = false;
 }

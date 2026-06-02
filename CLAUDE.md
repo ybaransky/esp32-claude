@@ -109,7 +109,7 @@ Every request is logged to Serial: `[HTTP] METHOD /path <- client-ip  => status`
 | `src/histogram.h/.cpp` | Temperature-delta frequency histogram: bins, centering, rendering |
 | `src/display.h/.cpp` | U8G2 display init (`displayBegin()`, `displayDevice()`) |
 | `src/panel_manager.h/.cpp` | Panel lifecycle: activation, priority queue, expiry, render dispatch |
-| `src/button.h/.cpp` | Two-button input: debounce, click/long-press → `ButtonEvent` queue |
+| `src/button.h/.cpp` | Two-button input: debounce, click/long-press → `ButtonEvent` queue, non-blocking LED feedback pulse |
 | `src/button_event_handler.h/.cpp` | Button event dispatch: maps queued `ButtonEvent`s to panel transitions, graph/histogram commands, I2C scan, network info, and RTC status |
 | `src/rtc_ds3231.h/.cpp` | DS3231 RTC init, 1 Hz SQW ISR, tick, status, time string |
 | `src/config.h/.cpp` | LittleFS mount + `config.json` parsing |
@@ -131,11 +131,12 @@ Every request is logged to Serial: `[HTTP] METHOD /path <- client-ip  => status`
 
 ### Data flow per loop iteration
 1. `buttonTick()` — debounce buttons, enqueue `ButtonEvent`s
-2. `rtcTick()` — service 1 Hz SQW interrupt
-3. `webHandleClients()` — process pending HTTP requests
-4. `processButtonEvents()` — dispatch queued events via `button_event_handler` → panel transitions or data resets
-5. `sensorsUpdate()` — every 1 s: read BMP280 + SHT31, compute `deltaF = bmpF - shtF`; on success call `updateAllData()` (graph, histogram, web); on error show `ERROR_MESSAGE` panel
-6. `renderFrame()` — check panel expiry, redraw if panel changed, fresh data, or forced
+2. `buttonLedTick()` — service non-blocking LED feedback pulse
+3. `rtcTick()` — service 1 Hz SQW interrupt
+4. `webHandleClients()` — process pending HTTP requests
+5. `processButtonEvents()` — dispatch queued events via `button_event_handler` → panel transitions or data resets
+6. `sensorsUpdate()` — every 1 s: read BMP280 + SHT31, compute `deltaF = bmpF - shtF`; on success call `updateAllData()` (graph, histogram, web); on error show `ERROR_MESSAGE` panel
+7. `renderFrame()` — check panel expiry, redraw if panel changed, fresh data, or forced
 
 ### Graph rendering (`src/graph.cpp`)
 - Lifetime min/max of `deltaF` with 5% padding drive Y-axis; falls back to ±0.1 before any data

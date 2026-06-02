@@ -2,11 +2,7 @@
 #include "display.h"
 
 static constexpr unsigned long SPLASH_DURATION_MS    = 4000;
-static constexpr unsigned long MENU_DURATION_MS      = 5000;
-static constexpr unsigned long NETWORK_DURATION_MS   = 5000;
-static constexpr unsigned long I2C_SCAN_DURATION_MS  = 5000;
-static constexpr unsigned long RTC_STATUS_DURATION_MS = 5000;
-static constexpr unsigned long ERROR_DURATION_MS     = 5000;
+static constexpr unsigned long DEFAULT_TIMED_PANEL_DURATION_MS = 5000;
 static constexpr unsigned long TIMED_PANEL_REFRESH_MS = 250;
 
 PanelManager::PanelManager()
@@ -21,11 +17,12 @@ PanelManager::PanelManager()
 unsigned long PanelManager::panelDuration(Panel panel) {
   switch (panel) {
     case Panel::SPLASH:        return SPLASH_DURATION_MS;
-    case Panel::MENU:          return MENU_DURATION_MS;
-    case Panel::NETWORK_INFO:  return NETWORK_DURATION_MS;
-    case Panel::I2C_SCAN:      return I2C_SCAN_DURATION_MS;
-    case Panel::RTC_STATUS:    return RTC_STATUS_DURATION_MS;
-    case Panel::ERROR_MESSAGE: return ERROR_DURATION_MS;
+    case Panel::MENU:
+    case Panel::NETWORK_INFO:
+    case Panel::I2C_SCAN:
+    case Panel::RTC_STATUS:
+    case Panel::ERROR_MESSAGE:
+      return DEFAULT_TIMED_PANEL_DURATION_MS;
     default:                   return 0;
   }
 }

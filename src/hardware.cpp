@@ -20,7 +20,7 @@ void i2cScan() {
       found++;
     }
   }
-  lastScanCount = found;
+  lastScanCount = (found < sizeof(lastScanAddresses)) ? found : sizeof(lastScanAddresses);
   Serial.printf("Scan complete. %u device(s) found.\n\n", static_cast<unsigned>(found));
 }
 

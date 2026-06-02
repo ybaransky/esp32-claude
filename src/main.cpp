@@ -37,6 +37,12 @@ static void updateAllData(const SensorReadings &readings) {
                 readings.bmpF, readings.shtF, readings.deltaF);
 }
 
+static const char* describeSensorFailure(bool bmpError, bool shtError) {
+  if (bmpError && shtError) return "BMP and SHT";
+  if (bmpError) return "BMP";
+  return "SHT";
+}
+
 // Returns true if fresh sensor data was successfully read.
 static bool sensorsUpdate(AppState &state, unsigned long now) {
   if (now - state.lastSensorReadMs < READ_INTERVAL_MS) return false;
@@ -48,10 +54,7 @@ static bool sensorsUpdate(AppState &state, unsigned long now) {
   bool shtError = isnan(state.lastReadings.shtF);
 
   if (bmpError || shtError) {
-    const String failedSensor = (bmpError && shtError) ? "BMP and SHT"
-                              : bmpError               ? "BMP"
-                                                       : "SHT";
-    state.panelMgr.setPanel(Panel::ERROR_MESSAGE, PanelPayload::error(failedSensor), now);
+    state.panelMgr.setPanel(Panel::ERROR_MESSAGE, PanelPayload::error(describeSensorFailure(bmpError, shtError)), now);
     return false;
   }
 
@@ -108,6 +111,7 @@ void loop() {
   }
 
   buttonTick();
+  buttonLedTick(now);
   rtcTick();
   webHandleClients();
 

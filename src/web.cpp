@@ -10,6 +10,17 @@ static WebServer      server(80);
 static DNSServer      dnsServer;
 static SensorReadings lastSensorReading;
 
+namespace Routes {
+    constexpr const char *ROOT = "/";
+    constexpr const char *API_SENSORS = "/api/sensors";
+    constexpr const char *API_BMP = "/api/bmp";
+    constexpr const char *API_SHT = "/api/sht";
+    constexpr const char *API_DIFF = "/api/diff";
+    constexpr const char *API_LIVE = "/api/live";
+    constexpr const char *API_GRAPH = "/api/graph";
+    constexpr const char *API_HISTOGRAM = "/api/histogram";
+    constexpr const char *API_STATE = "/api/state";
+}
 
 void networkGetInfo(String &ssid, String &ip) {
     ssid = WiFi.softAPSSID();
@@ -53,11 +64,13 @@ static String buildSensorReadingJson() {
     return String(buf);
 }
 
-static String buildSingleReadingJson(const char *name, float value, const char *fmt = "%.2f") {
+static String buildSingleReadingJson(const char *name, float value, bool forceSign = false) {
     char buf[32];
-    char fmtBuf[24];
-    snprintf(fmtBuf, sizeof(fmtBuf), "{\"%s\":%s}", name, fmt);
-    snprintf(buf, sizeof(buf), fmtBuf, value);
+    snprintf(buf,
+             sizeof(buf),
+             forceSign ? "{\"%s\":%+.2f}" : "{\"%s\":%.2f}",
+             name,
+             value);
     return String(buf);
 }
 
@@ -79,7 +92,7 @@ static void handleApiSht() {
 }
 
 static void handleApiDiff() {
-    sendJson(200, buildSingleReadingJson("diff", lastSensorReading.deltaF, "%+.2f"));
+    sendJson(200, buildSingleReadingJson("diff", lastSensorReading.deltaF, true));
 }
 
 static void handleApiLive() {
@@ -94,12 +107,10 @@ static void handleApiLive() {
     sendJson(200, buf);
 }
 
-static String buildGraphJson() {
+static void appendGraphJson(String &json) {
     const float *history = graphGetHistory();
     const int count = graphGetHistoryCount();
 
-    String json;
-    json.reserve(1800);
     json += "{\"count\":";
     json += count;
     json += ",\"history\":[";
@@ -108,15 +119,19 @@ static String buildGraphJson() {
         json += String(history[i], 2);
     }
     json += "]}";
+}
+
+static String buildGraphJson() {
+    String json;
+    json.reserve(1800);
+    appendGraphJson(json);
     return json;
 }
 
-static String buildHistogramJson() {
+static void appendHistogramJson(String &json) {
     const int *bins = histogramGetBins();
     const int binCount = histogramGetBinCount();
 
-    String json;
-    json.reserve(12000);
     json += "{\"center\":";
     json += String(histogramGetCenterValueF(), 2);
     json += ",\"halfRange\":";
@@ -134,6 +149,12 @@ static String buildHistogramJson() {
         json += bins[i];
     }
     json += "]}";
+}
+
+static String buildHistogramJson() {
+    String json;
+    json.reserve(12000);
+    appendHistogramJson(json);
     return json;
 }
 
@@ -155,9 +176,9 @@ static void handleApiState() {
     json += ",\"diff\":";
     json += String(lastSensorReading.deltaF, 2);
     json += ",\"graph\":";
-    json += buildGraphJson();
+    appendGraphJson(json);
     json += ",\"histogram\":";
-    json += buildHistogramJson();
+    appendHistogramJson(json);
     json += '}';
 
     sendJson(200, json);
@@ -181,15 +202,15 @@ void webBegin(const char *ssid, const char *password) {
     // Answer every DNS query with our IP so browsers trigger the captive portal flow.
     dnsServer.start(53, "*", WiFi.softAPIP());
 
-    server.on("/",            handleRoot);
-    server.on("/api/sensors", handleApiSensors);
-    server.on("/api/bmp",     handleApiBmp);
-    server.on("/api/sht",     handleApiSht);
-    server.on("/api/diff",    handleApiDiff);
-    server.on("/api/live",    handleApiLive);
-    server.on("/api/graph",   handleApiGraph);
-    server.on("/api/histogram", handleApiHistogram);
-    server.on("/api/state",   handleApiState);
+    server.on(Routes::ROOT,          handleRoot);
+    server.on(Routes::API_SENSORS,   handleApiSensors);
+    server.on(Routes::API_BMP,       handleApiBmp);
+    server.on(Routes::API_SHT,       handleApiSht);
+    server.on(Routes::API_DIFF,      handleApiDiff);
+    server.on(Routes::API_LIVE,      handleApiLive);
+    server.on(Routes::API_GRAPH,     handleApiGraph);
+    server.on(Routes::API_HISTOGRAM, handleApiHistogram);
+    server.on(Routes::API_STATE,     handleApiState);
     server.onNotFound(handleCaptiveRedirect);
     server.begin();
     Serial.println("HTTP server started");
