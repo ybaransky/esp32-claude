@@ -2,6 +2,8 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 
+constexpr uint8_t PANEL_QUEUE_CAPACITY = 6;
+
 enum class Panel {
   GRAPH,
   HISTOGRAM,
@@ -17,6 +19,19 @@ struct PanelPayload {
   String networkSsid;
   String networkIp;
   String errorMessage;
+
+  static PanelPayload networkInfo(const String &ssid, const String &ip) {
+    PanelPayload payload;
+    payload.networkSsid = ssid;
+    payload.networkIp   = ip;
+    return payload;
+  }
+
+  static PanelPayload error(const String &message) {
+    PanelPayload payload;
+    payload.errorMessage = message;
+    return payload;
+  }
 
   bool operator==(const PanelPayload &other) const {
     return networkSsid  == other.networkSsid  &&
@@ -55,13 +70,16 @@ struct PanelManager {
   unsigned long panelUntil;
   unsigned long lastRender;
   PanelPayload  panelData;
-  PanelRequest  queuedPanels[6];
+  PanelRequest  queuedPanels[PANEL_QUEUE_CAPACITY];
   uint8_t       queuedPanelCount;
 
   void activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now);
   bool enqueuePanelBack(Panel panel, unsigned long durationMs, const PanelPayload &data);
   bool enqueuePanelFront(Panel panel, unsigned long durationMs, const PanelPayload &data);
   bool dequeuePanel(PanelRequest &request);
+  bool shouldRenderTimedPanel(unsigned long now) const;
+  unsigned long secondsRemaining(unsigned long now) const;
+  void markRendered(unsigned long now);
 
   static int           panelPriority(Panel panel);
   static unsigned long panelDuration(Panel panel);

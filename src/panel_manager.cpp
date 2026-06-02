@@ -7,6 +7,7 @@ static constexpr unsigned long NETWORK_DURATION_MS   = 5000;
 static constexpr unsigned long I2C_SCAN_DURATION_MS  = 5000;
 static constexpr unsigned long RTC_STATUS_DURATION_MS = 5000;
 static constexpr unsigned long ERROR_DURATION_MS     = 5000;
+static constexpr unsigned long TIMED_PANEL_REFRESH_MS = 250;
 
 PanelManager::PanelManager()
   : currentPanel(Panel::GRAPH),
@@ -38,13 +39,13 @@ void PanelManager::activatePanel(Panel panel, unsigned long durationMs, const Pa
 }
 
 bool PanelManager::enqueuePanelBack(Panel panel, unsigned long durationMs, const PanelPayload &data) {
-  if (queuedPanelCount >= 6) return false;
+  if (queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
   queuedPanels[queuedPanelCount++] = {panel, durationMs, data};
   return true;
 }
 
 bool PanelManager::enqueuePanelFront(Panel panel, unsigned long durationMs, const PanelPayload &data) {
-  if (queuedPanelCount >= 6) return false;
+  if (queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
   for (int i = queuedPanelCount; i > 0; --i) {
     queuedPanels[i] = queuedPanels[i - 1];
   }
@@ -110,60 +111,64 @@ bool PanelManager::checkExpiration(unsigned long now) {
   return true;
 }
 
-void PanelManager::render(U8G2 &u8g2, unsigned long now) {
-  bool changed = panelChanged();
+bool PanelManager::shouldRenderTimedPanel(unsigned long now) const {
+  return panelChanged() || now - lastRender >= TIMED_PANEL_REFRESH_MS;
+}
 
+unsigned long PanelManager::secondsRemaining(unsigned long now) const {
+  return (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
+}
+
+void PanelManager::markRendered(unsigned long now) {
+  lastRender = now;
+}
+
+void PanelManager::render(U8G2 &u8g2, unsigned long now) {
   switch (currentPanel) {
     case Panel::GRAPH:
     case Panel::HISTOGRAM:
-      lastRender = now;
+      markRendered(now);
       break;
 
     case Panel::SPLASH:
-      if (changed || now - lastRender >= 250UL) {
-        unsigned long secs = (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
-        showSplash(u8g2, secs);
-        lastRender = now;
+      if (shouldRenderTimedPanel(now)) {
+        showSplash(u8g2, secondsRemaining(now));
+        markRendered(now);
       }
       break;
 
     case Panel::MENU:
-      if (changed || now - lastRender >= 250UL) {
-        unsigned long secs = (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
-        showMenu(u8g2, secs);
-        lastRender = now;
+      if (shouldRenderTimedPanel(now)) {
+        showMenu(u8g2, secondsRemaining(now));
+        markRendered(now);
       }
       break;
 
     case Panel::NETWORK_INFO:
-      if (changed || now - lastRender >= 250UL) {
-        unsigned long secs = (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
-        showNetworkInfo(u8g2, panelData.networkSsid, panelData.networkIp, secs);
-        lastRender = now;
+      if (shouldRenderTimedPanel(now)) {
+        showNetworkInfo(u8g2, panelData.networkSsid, panelData.networkIp, secondsRemaining(now));
+        markRendered(now);
       }
       break;
 
     case Panel::I2C_SCAN:
-      if (changed || now - lastRender >= 250UL) {
-        unsigned long secs = (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
-        showI2CScan(u8g2, secs);
-        lastRender = now;
+      if (shouldRenderTimedPanel(now)) {
+        showI2CScan(u8g2, secondsRemaining(now));
+        markRendered(now);
       }
       break;
 
     case Panel::RTC_STATUS:
-      if (changed || now - lastRender >= 250UL) {
-        unsigned long secs = (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
-        showRtcStatus(u8g2, secs);
-        lastRender = now;
+      if (shouldRenderTimedPanel(now)) {
+        showRtcStatus(u8g2, secondsRemaining(now));
+        markRendered(now);
       }
       break;
 
     case Panel::ERROR_MESSAGE:
-      if (changed || now - lastRender >= 250UL) {
-        unsigned long secs = (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
-        showErrorMessage(u8g2, panelData.errorMessage, secs);
-        lastRender = now;
+      if (shouldRenderTimedPanel(now)) {
+        showErrorMessage(u8g2, panelData.errorMessage, secondsRemaining(now));
+        markRendered(now);
       }
       break;
   }

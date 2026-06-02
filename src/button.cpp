@@ -6,13 +6,13 @@
 static OneButton btn1(Hardware::Pins::BUTTON_1, true, true);
 static OneButton btn2(Hardware::Pins::BUTTON_2, true, true);
 
-constexpr int EVENT_QUEUE_CAPACITY = 8;
-static volatile ButtonEvent eventQueue[EVENT_QUEUE_CAPACITY];
+constexpr int BUTTON_EVENT_QUEUE_CAPACITY = 8;
+static volatile ButtonEvent eventQueue[BUTTON_EVENT_QUEUE_CAPACITY];
 static volatile int eventHead = 0;
 static volatile int eventTail = 0;
 
 static void enqueueEvent(ButtonEvent evt) {
-    int next = (eventTail + 1) % EVENT_QUEUE_CAPACITY;
+    int next = (eventTail + 1) % BUTTON_EVENT_QUEUE_CAPACITY;
     if (next != eventHead) {
         eventQueue[eventTail] = evt;
         eventTail = next;
@@ -26,7 +26,7 @@ bool buttonHasEvent() {
 ButtonEvent buttonNextEvent() {
     if (eventHead == eventTail) return ButtonEvent::NONE;
     ButtonEvent evt = eventQueue[eventHead];
-    eventHead = (eventHead + 1) % EVENT_QUEUE_CAPACITY;
+    eventHead = (eventHead + 1) % BUTTON_EVENT_QUEUE_CAPACITY;
     return evt;
 }
 

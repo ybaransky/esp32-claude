@@ -3,10 +3,19 @@
 #include <string.h>
 #include <math.h>
 
-static float graphHistory[GRAPH_WIDTH];
-static int   graphHistoryCount = 0;
-static Bounds totalBounds = {0.0f, 0.0f, false};
-static Bounds graphBounds = {0.0f, 0.0f, false};
+struct GraphState {
+  float  history[GRAPH_WIDTH];
+  int    historyCount;
+  Bounds totalBounds;
+  Bounds graphBounds;
+};
+
+static GraphState graphState = {
+  {},
+  0,
+  {0.0f, 0.0f, false},
+  {0.0f, 0.0f, false},
+};
 
 static void updateBounds(Bounds &bounds, float data) {
   if (!bounds.initialized) {
@@ -21,43 +30,39 @@ static void updateBounds(Bounds &bounds, float data) {
 
 void graphResetBounds() {
   Serial.println("[GRAPH] Resetting graph bounds");
-  if (graphHistoryCount <= 0) {
+  if (graphState.historyCount <= 0) {
     Serial.println("[GRAPH] No graph history; bounds reset skipped");
     return;
   }
 
-  float min = graphHistory[0];
-  float max = graphHistory[0];
-  for (int i=1; i < graphHistoryCount; i++) {
-    min = fminf(min, graphHistory[i]);
-    max = fmaxf(max, graphHistory[i]);
+  float min = graphState.history[0];
+  float max = graphState.history[0];
+  for (int i=1; i < graphState.historyCount; i++) {
+    min = fminf(min, graphState.history[i]);
+    max = fmaxf(max, graphState.history[i]);
   }
-  graphBounds = {min, max, true};
+  graphState.graphBounds = {min, max, true};
 }
 void graphUpdateBounds(float data) {
-  updateBounds(totalBounds, data);
-  updateBounds(graphBounds, data);
+  updateBounds(graphState.totalBounds, data);
+  updateBounds(graphState.graphBounds, data);
 }
 
 void graphUpdateData(float data) {
-  if (graphHistoryCount < GRAPH_WIDTH) {
-    graphHistory[graphHistoryCount++] = data;
+  if (graphState.historyCount < GRAPH_WIDTH) {
+    graphState.history[graphState.historyCount++] = data;
     return;
   }
-  memmove(graphHistory, graphHistory + 1, sizeof(float) * (GRAPH_WIDTH - 1));
-  graphHistory[GRAPH_WIDTH - 1] = data;
+  memmove(graphState.history, graphState.history + 1, sizeof(float) * (GRAPH_WIDTH - 1));
+  graphState.history[GRAPH_WIDTH - 1] = data;
 }
 
 void graphResetState() {
   Serial.println("[GRAPH] Resetting graph bounds/history");
-  memset(graphHistory, 0, sizeof(graphHistory));
-  graphHistoryCount = 0;
-
-  totalBounds = {0.0f, 0.0f, false};
-  graphBounds = {0.0f, 0.0f, false};
+  graphState = {};
 }
 
-Bounds graphGetGraphBounds() { return graphBounds; }
-Bounds graphGetTotalBounds() { return totalBounds; }
-const float *graphGetHistory() { return graphHistory; }
-int graphGetHistoryCount()    { return graphHistoryCount; }
+Bounds graphGetGraphBounds() { return graphState.graphBounds; }
+Bounds graphGetTotalBounds() { return graphState.totalBounds; }
+const float *graphGetHistory() { return graphState.history; }
+int graphGetHistoryCount()    { return graphState.historyCount; }

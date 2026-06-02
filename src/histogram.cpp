@@ -4,23 +4,27 @@
 #include <string.h>
 #include <Arduino.h>
 
-static int      histogramBins[HISTOGRAM_BIN_COUNT] = {0};
-static int32_t  centerScaledValue   = 0;
-static bool     initialized         = false;
-static int32_t  minScaledOffset     = 0;  // most negative offset seen
-static int32_t  maxScaledOffset     = 0;  // most positive offset seen
-static int      latchedMaxFrequency = 0;
-static uint32_t sampleCount         = 0;
+struct HistogramState {
+  int      bins[HISTOGRAM_BIN_COUNT];
+  int32_t  centerScaledValue;
+  bool     initialized;
+  int32_t  minScaledOffset;
+  int32_t  maxScaledOffset;
+  int      latchedMaxFrequency;
+  uint32_t sampleCount;
+};
+
+static HistogramState histogramState = {};
 
 void histogramUpdateData(float data) {
   const int32_t scaledValue = static_cast<int32_t>(lround(static_cast<double>(data) * HISTOGRAM_VALUE_SCALE));
 
-  if (!initialized) {
-    centerScaledValue = scaledValue;
-    initialized       = true;
+  if (!histogramState.initialized) {
+    histogramState.centerScaledValue = scaledValue;
+    histogramState.initialized       = true;
   }
 
-  const int32_t offset = scaledValue - centerScaledValue;
+  const int32_t offset = scaledValue - histogramState.centerScaledValue;
   const int index = HISTOGRAM_CENTER_INDEX + static_cast<int>(offset);
 
   if (index < 0 || index >= HISTOGRAM_BIN_COUNT) {
@@ -29,30 +33,30 @@ void histogramUpdateData(float data) {
     return;
   }
 
-  histogramBins[index]++;
-  sampleCount++;
+  histogramState.bins[index]++;
+  histogramState.sampleCount++;
 
-  if (sampleCount == 1) {
-    minScaledOffset = offset;
-    maxScaledOffset = offset;
+  if (histogramState.sampleCount == 1) {
+    histogramState.minScaledOffset = offset;
+    histogramState.maxScaledOffset = offset;
   } else {
-    if (offset < minScaledOffset) minScaledOffset = offset;
-    if (offset > maxScaledOffset) maxScaledOffset = offset;
+    if (offset < histogramState.minScaledOffset) histogramState.minScaledOffset = offset;
+    if (offset > histogramState.maxScaledOffset) histogramState.maxScaledOffset = offset;
   }
 
-  if (histogramBins[index] > latchedMaxFrequency) {
-    latchedMaxFrequency = histogramBins[index];
+  if (histogramState.bins[index] > histogramState.latchedMaxFrequency) {
+    histogramState.latchedMaxFrequency = histogramState.bins[index];
   }
 }
 
 void histogramRecenterOnPeak() {
-  if (!initialized || sampleCount == 0) return;
+  if (!histogramState.initialized || histogramState.sampleCount == 0) return;
 
   int peakIndex = HISTOGRAM_CENTER_INDEX;
   int peakCount = 0;
   for (int i = 0; i < HISTOGRAM_BIN_COUNT; ++i) {
-    if (histogramBins[i] > peakCount) {
-      peakCount = histogramBins[i];
+    if (histogramState.bins[i] > peakCount) {
+      peakCount = histogramState.bins[i];
       peakIndex = i;
     }
   }
@@ -65,45 +69,39 @@ void histogramRecenterOnPeak() {
   for (int i = 0; i < HISTOGRAM_BIN_COUNT; ++i) {
     const int dest = i - shift;
     if (dest >= 0 && dest < HISTOGRAM_BIN_COUNT) {
-      newBins[dest] = histogramBins[i];
+      newBins[dest] = histogramState.bins[i];
     }
   }
-  memcpy(histogramBins, newBins, sizeof(histogramBins));
+  memcpy(histogramState.bins, newBins, sizeof(histogramState.bins));
 
   // The new center is the peak's former scaled value.
-  centerScaledValue += shift;
+  histogramState.centerScaledValue += shift;
   // Offsets are relative to center, so they shrink by the same shift.
-  minScaledOffset -= shift;
-  maxScaledOffset -= shift;
+  histogramState.minScaledOffset -= shift;
+  histogramState.maxScaledOffset -= shift;
 
   Serial.printf("[HIST] Recentered on peak at %.2f\n",
-                static_cast<float>(centerScaledValue) * HISTOGRAM_BIN_SIZE_F);
+                static_cast<float>(histogramState.centerScaledValue) * HISTOGRAM_BIN_SIZE_F);
 }
 
 void histogramReset() {
-  memset(histogramBins, 0, sizeof(histogramBins));
-  centerScaledValue   = 0;
-  initialized         = false;
-  minScaledOffset     = 0;
-  maxScaledOffset     = 0;
-  latchedMaxFrequency = 0;
-  sampleCount         = 0;
+  histogramState = {};
 }
 
-const int *histogramGetBins()  { return histogramBins; }
+const int *histogramGetBins()  { return histogramState.bins; }
 int  histogramGetBinCount()    { return HISTOGRAM_BIN_COUNT; }
 
 float histogramGetCenterValueF() {
-  return static_cast<float>(centerScaledValue) * HISTOGRAM_BIN_SIZE_F;
+  return static_cast<float>(histogramState.centerScaledValue) * HISTOGRAM_BIN_SIZE_F;
 }
 
 // Symmetric half-width: the larger of the two extremes so the display is balanced.
 int32_t histogramGetHalfRange() {
-  const int32_t lo = (minScaledOffset < 0) ? -minScaledOffset : minScaledOffset;
-  const int32_t hi = (maxScaledOffset < 0) ? -maxScaledOffset : maxScaledOffset;
+  const int32_t lo = (histogramState.minScaledOffset < 0) ? -histogramState.minScaledOffset : histogramState.minScaledOffset;
+  const int32_t hi = (histogramState.maxScaledOffset < 0) ? -histogramState.maxScaledOffset : histogramState.maxScaledOffset;
   const int32_t half = (lo > hi) ? lo : hi;
   return (half < 1) ? 1 : half;
 }
 
-int      histogramGetLatchedMaxFrequency() { return latchedMaxFrequency; }
-uint32_t histogramGetSampleCount()         { return sampleCount; }
+int      histogramGetLatchedMaxFrequency() { return histogramState.latchedMaxFrequency; }
+uint32_t histogramGetSampleCount()         { return histogramState.sampleCount; }

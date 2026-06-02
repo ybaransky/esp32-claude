@@ -35,43 +35,54 @@ static void logRequest(int status) {
         status);
 }
 
+static void sendJson(int status, const char *json) {
+    logRequest(status);
+    server.send(status, "application/json", json);
+}
+
+static void sendJson(int status, const String &json) {
+    logRequest(status);
+    server.send(status, "application/json", json);
+}
+
+static String buildSensorReadingJson() {
+    char buf[72];
+    snprintf(buf, sizeof(buf),
+             "{\"bmp\":%.2f,\"sht\":%.2f,\"diff\":%.2f}",
+             lastSensorReading.bmpF, lastSensorReading.shtF, lastSensorReading.deltaF);
+    return String(buf);
+}
+
+static String buildSingleReadingJson(const char *name, float value, const char *fmt = "%.2f") {
+    char buf[32];
+    char fmtBuf[24];
+    snprintf(fmtBuf, sizeof(fmtBuf), "{\"%s\":%s}", name, fmt);
+    snprintf(buf, sizeof(buf), fmtBuf, value);
+    return String(buf);
+}
+
 static void handleRoot() {
     logRequest(200);
     server.send(200, "text/html", INDEX_HTML);
 }
 
 static void handleApiSensors() {
-    logRequest(200);
-    char buf[72];
-    snprintf(buf, sizeof(buf),
-             "{\"bmp\":%.2f,\"sht\":%.2f,\"diff\":%.2f}",
-             lastSensorReading.bmpF, lastSensorReading.shtF, lastSensorReading.deltaF);
-    server.send(200, "application/json", buf);
+    sendJson(200, buildSensorReadingJson());
 }
 
 static void handleApiBmp() {
-    logRequest(200);
-    char buf[24];
-    snprintf(buf, sizeof(buf), "{\"bmp\":%.2f}", lastSensorReading.bmpF);
-    server.send(200, "application/json", buf);
+    sendJson(200, buildSingleReadingJson("bmp", lastSensorReading.bmpF));
 }
 
 static void handleApiSht() {
-    logRequest(200);
-    char buf[24];
-    snprintf(buf, sizeof(buf), "{\"sht\":%.2f}", lastSensorReading.shtF);
-    server.send(200, "application/json", buf);
+    sendJson(200, buildSingleReadingJson("sht", lastSensorReading.shtF));
 }
 
 static void handleApiDiff() {
-    logRequest(200);
-    char buf[24];
-    snprintf(buf, sizeof(buf), "{\"diff\":%+.2f}", lastSensorReading.deltaF);
-    server.send(200, "application/json", buf);
+    sendJson(200, buildSingleReadingJson("diff", lastSensorReading.deltaF, "%+.2f"));
 }
 
 static void handleApiLive() {
-    logRequest(200);
     char buf[112];
     snprintf(buf, sizeof(buf),
              "{\"bmp\":%.2f,\"sht\":%.2f,\"diff\":%.2f,\"graphCount\":%d,\"histSampleCount\":%lu}",
@@ -80,7 +91,7 @@ static void handleApiLive() {
              lastSensorReading.deltaF,
              graphGetHistoryCount(),
              static_cast<unsigned long>(histogramGetSampleCount()));
-    server.send(200, "application/json", buf);
+    sendJson(200, buf);
 }
 
 static String buildGraphJson() {
@@ -127,18 +138,14 @@ static String buildHistogramJson() {
 }
 
 static void handleApiGraph() {
-    logRequest(200);
-    server.send(200, "application/json", buildGraphJson());
+    sendJson(200, buildGraphJson());
 }
 
 static void handleApiHistogram() {
-    logRequest(200);
-    server.send(200, "application/json", buildHistogramJson());
+    sendJson(200, buildHistogramJson());
 }
 
 static void handleApiState() {
-    logRequest(200);
-
     String json;
     json.reserve(15000);
     json += "{\"bmp\":";
@@ -153,7 +160,7 @@ static void handleApiState() {
     json += buildHistogramJson();
     json += '}';
 
-    server.send(200, "application/json", json);
+    sendJson(200, json);
 }
 
 static void handleCaptiveRedirect() {
