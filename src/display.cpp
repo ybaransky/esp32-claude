@@ -225,10 +225,6 @@ static void drawHistogramBars(U8G2 &u8g2, const int *buckets, int count,
     u8g2.drawVLine(startX + col, GRAPH_BOTTOM - barHeight, barHeight);
   }
 
-  // Dotted vertical line at the fixed center.
-  for (int y = GRAPH_TOP; y <= GRAPH_BOTTOM; y += 2) {
-    u8g2.drawPixel(axisCenterX, y);
-  }
 }
 
 void showHistogram(U8G2 &u8g2, const SensorReadings &readings) {
