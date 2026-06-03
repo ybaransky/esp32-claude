@@ -1,43 +1,40 @@
 #include "button_event_handler.h"
-
 #include "button.h"
 #include "graph.h"
 #include "hardware.h"
 #include "histogram.h"
+#include "panel_manager.h"
 #include "web.h"
 
-static void showPanel(PanelManager &panelMgr, Panel panel, unsigned long now) {
-  panelMgr.setPanel(panel, PanelPayload{}, now);
+static void showPanel(Panel panel, unsigned long now) {
+  panelSet(panel, PanelPayload{}, now);
 }
 
-static void showNetworkInfo(PanelManager &panelMgr, unsigned long now) {
+static void showNetworkInfo(unsigned long now) {
   String ssid;
   String ip;
   networkGetInfo(ssid, ip);
-  panelMgr.setPanel(Panel::NETWORK_INFO, PanelPayload::networkInfo(ssid, ip), now);
+  panelSet(Panel::NETWORK_INFO, PanelPayload::networkInfo(ssid, ip), now);
 }
 
-static bool handleMenuCommand(PanelManager &panelMgr, unsigned long now) {
-  if (panelMgr.getCurrentPanel() != Panel::HISTOGRAM) {
-    showPanel(panelMgr, Panel::MENU, now);
+static bool handleMenuCommand(unsigned long now) {
+  if (panelGetCurrent() != Panel::HISTOGRAM) {
+    showPanel(Panel::MENU, now);
     return false;
   }
-
   histogramRecenterOnPeak();
   return true;
 }
 
-static bool togglePrimaryPanel(PanelManager &panelMgr, unsigned long now) {
-  const Panel next = (panelMgr.getPrimaryPanel() == Panel::GRAPH)
-                   ? Panel::HISTOGRAM : Panel::GRAPH;
-  panelMgr.setPanel(next, PanelPayload{}, now);
-  Serial.printf("[BTN1] Base view: %s\n",
-                next == Panel::HISTOGRAM ? "Histogram" : "Graph");
+static bool togglePrimaryPanel(unsigned long now) {
+  const Panel next = (panelGetPrimary() == Panel::GRAPH) ? Panel::HISTOGRAM : Panel::GRAPH;
+  panelSet(next, PanelPayload{}, now);
+  Serial.printf("[BTN1] Base view: %s\n", next == Panel::HISTOGRAM ? "Histogram" : "Graph");
   return true;
 }
 
-static bool resetCurrentPanelData(PanelManager &panelMgr) {
-  const Panel current = panelMgr.getCurrentPanel();
+static bool resetCurrentPanelData() {
+  const Panel current = panelGetCurrent();
 
   if (current == Panel::GRAPH) {
     graphResetBounds();
@@ -55,34 +52,34 @@ static bool resetCurrentPanelData(PanelManager &panelMgr) {
   return false;
 }
 
-bool processButtonEvents(PanelManager &panelMgr, unsigned long now) {
+bool buttonHandleEvents(unsigned long now) {
   bool forceRedraw = false;
 
   while (buttonHasEvent()) {
     switch (buttonNextEvent()) {
       case ButtonEvent::MENU:
-        forceRedraw |= handleMenuCommand(panelMgr, now);
+        forceRedraw |= handleMenuCommand(now);
         break;
 
       case ButtonEvent::I2C_SCAN:
         i2cScan();
-        showPanel(panelMgr, Panel::I2C_SCAN, now);
+        showPanel(Panel::I2C_SCAN, now);
         break;
 
       case ButtonEvent::RTC_STATUS:
-        showPanel(panelMgr, Panel::RTC_STATUS, now);
+        showPanel(Panel::RTC_STATUS, now);
         break;
 
       case ButtonEvent::NETWORK_INFO:
-        showNetworkInfo(panelMgr, now);
+        showNetworkInfo(now);
         break;
 
       case ButtonEvent::HISTOGRAM_TOGGLE:
-        forceRedraw |= togglePrimaryPanel(panelMgr, now);
+        forceRedraw |= togglePrimaryPanel(now);
         break;
 
       case ButtonEvent::PANEL_DATA_RESET:
-        forceRedraw |= resetCurrentPanelData(panelMgr);
+        forceRedraw |= resetCurrentPanelData();
         break;
 
       default:

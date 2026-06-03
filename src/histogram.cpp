@@ -105,3 +105,15 @@ int32_t histogramGetHalfRange() {
 
 int      histogramGetLatchedMaxFrequency() { return histogramState.latchedMaxFrequency; }
 uint32_t histogramGetSampleCount()         { return histogramState.sampleCount; }
+
+int histogramGetPeakBinIndex() {
+  int peakIndex = HISTOGRAM_CENTER_INDEX;
+  int peakCount = 0;
+  for (int i = 0; i < HISTOGRAM_BIN_COUNT; ++i) {
+    if (histogramState.bins[i] > peakCount) {
+      peakCount = histogramState.bins[i];
+      peakIndex = i;
+    }
+  }
+  return peakIndex;
+}

@@ -42,7 +42,7 @@ const char INDEX_HTML[] = R"rawliteral(
   </div>
   <script>
     const diffHistory = [];
-    const samplePeriodSec = 2;
+    const samplePeriodSec = 1;
     let histogramData = {
       bins: [],
       center: 0,
@@ -333,7 +333,7 @@ const char INDEX_HTML[] = R"rawliteral(
       try {
         await refreshFullState();
       } catch (e) {}
-      setInterval(refresh, 2000);
+      setInterval(refresh, 1000);
     }
 
     bootstrap();

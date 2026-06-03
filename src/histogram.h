@@ -21,3 +21,4 @@ float       histogramGetCenterValueF();
 int32_t     histogramGetHalfRange();
 int         histogramGetLatchedMaxFrequency();
 uint32_t    histogramGetSampleCount();
+int         histogramGetPeakBinIndex();

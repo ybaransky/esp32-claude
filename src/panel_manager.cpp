@@ -1,177 +1,48 @@
 #include "panel_manager.h"
-#include "display.h"
+#include "display_views.h"
 
-static constexpr unsigned long SPLASH_DURATION_MS    = 4000;
+static constexpr uint8_t       PANEL_QUEUE_CAPACITY            = 6;
+static constexpr unsigned long SPLASH_DURATION_MS              = 4000;
 static constexpr unsigned long DEFAULT_TIMED_PANEL_DURATION_MS = 5000;
-static constexpr unsigned long TIMED_PANEL_REFRESH_MS = 250;
+static constexpr unsigned long TIMED_PANEL_REFRESH_MS          = 250;
 
-PanelManager::PanelManager()
-  : currentPanel(Panel::GRAPH),
-    prevPanel(Panel::GRAPH),
-    primaryPanel(Panel::GRAPH),
-    panelUntil(0),
-    lastRender(0),
-    panelData(),
-    queuedPanelCount(0) {}
+struct PanelRequest {
+  Panel         panel;
+  unsigned long durationMs;
+  PanelPayload  data;
+};
 
-unsigned long PanelManager::panelDuration(Panel panel) {
+struct PanelState {
+  Panel         currentPanel     = Panel::GRAPH;
+  Panel         prevPanel        = Panel::GRAPH;
+  Panel         primaryPanel     = Panel::GRAPH;
+  unsigned long panelUntil       = 0;
+  unsigned long lastRender       = 0;
+  PanelPayload  panelData;
+  PanelRequest  queuedPanels[PANEL_QUEUE_CAPACITY];
+  uint8_t       queuedPanelCount = 0;
+};
+
+static PanelState ps;
+
+Panel panelGetCurrent() { return ps.currentPanel; }
+Panel panelGetPrimary() { return ps.primaryPanel; }
+bool  panelHasChanged() { return ps.currentPanel != ps.prevPanel; }
+
+static unsigned long panelDuration(Panel panel) {
   switch (panel) {
-    case Panel::SPLASH:        return SPLASH_DURATION_MS;
+    case Panel::SPLASH: return SPLASH_DURATION_MS;
     case Panel::MENU:
     case Panel::NETWORK_INFO:
     case Panel::I2C_SCAN:
     case Panel::RTC_STATUS:
     case Panel::ERROR_MESSAGE:
       return DEFAULT_TIMED_PANEL_DURATION_MS;
-    default:                   return 0;
+    default: return 0;
   }
 }
 
-void PanelManager::activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now) {
-  prevPanel    = currentPanel;
-  currentPanel = panel;
-  panelUntil   = (durationMs == 0) ? 0 : now + durationMs;
-  panelData    = data;
-  lastRender   = 0;
-}
-
-bool PanelManager::enqueuePanelBack(Panel panel, unsigned long durationMs, const PanelPayload &data) {
-  if (queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
-  queuedPanels[queuedPanelCount++] = {panel, durationMs, data};
-  return true;
-}
-
-bool PanelManager::enqueuePanelFront(Panel panel, unsigned long durationMs, const PanelPayload &data) {
-  if (queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
-  for (int i = queuedPanelCount; i > 0; --i) {
-    queuedPanels[i] = queuedPanels[i - 1];
-  }
-  queuedPanels[0] = {panel, durationMs, data};
-  queuedPanelCount++;
-  return true;
-}
-
-bool PanelManager::dequeuePanel(PanelRequest &request) {
-  if (queuedPanelCount == 0) return false;
-  request = queuedPanels[0];
-  for (uint8_t i = 1; i < queuedPanelCount; ++i) {
-    queuedPanels[i - 1] = queuedPanels[i];
-  }
-  queuedPanelCount--;
-  return true;
-}
-
-bool PanelManager::setPanel(Panel panel, const PanelPayload &data, unsigned long now) {
-  const unsigned long durationMs = panelDuration(panel);
-  bool dataChanged = !(panelData == data);
-
-  if (panel == Panel::GRAPH || panel == Panel::HISTOGRAM) {
-    primaryPanel = panel;
-  }
-
-  if (panel == currentPanel) {
-    if (durationMs != 0)  panelUntil = now + durationMs;
-    if (dataChanged)       panelData  = data;
-    return false;
-  }
-
-  if (currentPanel == Panel::GRAPH || currentPanel == Panel::HISTOGRAM) {
-    activatePanel(panel, durationMs, data, now);
-    return true;
-  }
-
-  if (panelPriority(panel) > panelPriority(currentPanel) && panel == Panel::ERROR_MESSAGE) {
-    unsigned long remainingMs = (panelUntil > now) ? (panelUntil - now) : 0;
-    if (currentPanel != Panel::GRAPH) {
-      enqueuePanelFront(currentPanel, remainingMs, panelData);
-    }
-    activatePanel(panel, durationMs, data, now);
-    return true;
-  }
-
-  enqueuePanelBack(panel, durationMs, data);
-  return false;
-}
-
-bool PanelManager::checkExpiration(unsigned long now) {
-  if (panelUntil == 0 || now < panelUntil) return false;
-
-  PanelRequest next;
-  if (dequeuePanel(next)) {
-    activatePanel(next.panel, next.durationMs, next.data, now);
-  } else {
-    prevPanel    = currentPanel;
-    currentPanel = primaryPanel;
-    panelUntil   = 0;
-    lastRender   = 0;
-  }
-  return true;
-}
-
-bool PanelManager::shouldRenderTimedPanel(unsigned long now) const {
-  return panelChanged() || now - lastRender >= TIMED_PANEL_REFRESH_MS;
-}
-
-unsigned long PanelManager::secondsRemaining(unsigned long now) const {
-  return (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
-}
-
-void PanelManager::markRendered(unsigned long now) {
-  lastRender = now;
-}
-
-void PanelManager::render(U8G2 &u8g2, unsigned long now) {
-  switch (currentPanel) {
-    case Panel::GRAPH:
-    case Panel::HISTOGRAM:
-      markRendered(now);
-      break;
-
-    case Panel::SPLASH:
-      if (shouldRenderTimedPanel(now)) {
-        showSplash(u8g2, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-
-    case Panel::MENU:
-      if (shouldRenderTimedPanel(now)) {
-        showMenu(u8g2, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-
-    case Panel::NETWORK_INFO:
-      if (shouldRenderTimedPanel(now)) {
-        showNetworkInfo(u8g2, panelData.networkSsid, panelData.networkIp, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-
-    case Panel::I2C_SCAN:
-      if (shouldRenderTimedPanel(now)) {
-        showI2CScan(u8g2, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-
-    case Panel::RTC_STATUS:
-      if (shouldRenderTimedPanel(now)) {
-        showRtcStatus(u8g2, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-
-    case Panel::ERROR_MESSAGE:
-      if (shouldRenderTimedPanel(now)) {
-        showErrorMessage(u8g2, panelData.errorMessage, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-  }
-}
-
-int PanelManager::panelPriority(Panel panel) {
+static int panelPriority(Panel panel) {
   switch (panel) {
     case Panel::ERROR_MESSAGE: return 20;
     case Panel::I2C_SCAN:      return 15;
@@ -180,5 +51,143 @@ int PanelManager::panelPriority(Panel panel) {
     case Panel::MENU:          return 5;
     case Panel::SPLASH:        return 1;
     default:                   return 0;
+  }
+}
+
+static void activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now) {
+  ps.prevPanel    = ps.currentPanel;
+  ps.currentPanel = panel;
+  ps.panelUntil   = (durationMs == 0) ? 0 : now + durationMs;
+  ps.panelData    = data;
+  ps.lastRender   = 0;
+}
+
+static bool enqueuePanelBack(Panel panel, unsigned long durationMs, const PanelPayload &data) {
+  if (ps.queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
+  ps.queuedPanels[ps.queuedPanelCount++] = {panel, durationMs, data};
+  return true;
+}
+
+static bool enqueuePanelFront(Panel panel, unsigned long durationMs, const PanelPayload &data) {
+  if (ps.queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
+  for (int i = ps.queuedPanelCount; i > 0; --i) {
+    ps.queuedPanels[i] = ps.queuedPanels[i - 1];
+  }
+  ps.queuedPanels[0] = {panel, durationMs, data};
+  ps.queuedPanelCount++;
+  return true;
+}
+
+static bool dequeuePanel(PanelRequest &request) {
+  if (ps.queuedPanelCount == 0) return false;
+  request = ps.queuedPanels[0];
+  for (uint8_t i = 1; i < ps.queuedPanelCount; ++i) {
+    ps.queuedPanels[i - 1] = ps.queuedPanels[i];
+  }
+  ps.queuedPanelCount--;
+  return true;
+}
+
+void panelSet(Panel panel, const PanelPayload &data, unsigned long now) {
+  const unsigned long durationMs  = panelDuration(panel);
+  const bool          dataChanged = !(ps.panelData == data);
+
+  if (panel == Panel::GRAPH || panel == Panel::HISTOGRAM) {
+    ps.primaryPanel = panel;
+  }
+
+  if (panel == ps.currentPanel) {
+    if (durationMs != 0) ps.panelUntil = now + durationMs;
+    if (dataChanged)     ps.panelData  = data;
+    return;
+  }
+
+  if (ps.currentPanel == Panel::GRAPH || ps.currentPanel == Panel::HISTOGRAM) {
+    activatePanel(panel, durationMs, data, now);
+    return;
+  }
+
+  if (panelPriority(panel) > panelPriority(ps.currentPanel) && panel == Panel::ERROR_MESSAGE) {
+    unsigned long remainingMs = (ps.panelUntil > now) ? (ps.panelUntil - now) : 0;
+    if (ps.currentPanel != Panel::GRAPH) {
+      enqueuePanelFront(ps.currentPanel, remainingMs, ps.panelData);
+    }
+    activatePanel(panel, durationMs, data, now);
+    return;
+  }
+
+  enqueuePanelBack(panel, durationMs, data);
+}
+
+void panelCheckExpiration(unsigned long now) {
+  if (ps.panelUntil == 0 || now < ps.panelUntil) return;
+
+  PanelRequest next;
+  if (dequeuePanel(next)) {
+    activatePanel(next.panel, next.durationMs, next.data, now);
+  } else {
+    ps.prevPanel    = ps.currentPanel;
+    ps.currentPanel = ps.primaryPanel;
+    ps.panelUntil   = 0;
+    ps.lastRender   = 0;
+  }
+}
+
+static bool shouldRenderTimed(unsigned long now) {
+  return panelHasChanged() || now - ps.lastRender >= TIMED_PANEL_REFRESH_MS;
+}
+
+static unsigned long secondsRemaining(unsigned long now) {
+  return (ps.panelUntil > now) ? ((ps.panelUntil - now + 999UL) / 1000UL) : 0;
+}
+
+void panelRender(U8G2 &u8g2, unsigned long now) {
+  switch (ps.currentPanel) {
+    case Panel::GRAPH:
+    case Panel::HISTOGRAM:
+      ps.lastRender = now;
+      break;
+
+    case Panel::SPLASH:
+      if (shouldRenderTimed(now)) {
+        showSplash(u8g2, secondsRemaining(now));
+        ps.lastRender = now;
+      }
+      break;
+
+    case Panel::MENU:
+      if (shouldRenderTimed(now)) {
+        showMenu(u8g2, secondsRemaining(now));
+        ps.lastRender = now;
+      }
+      break;
+
+    case Panel::NETWORK_INFO:
+      if (shouldRenderTimed(now)) {
+        showNetworkInfo(u8g2, ps.panelData.networkSsid, ps.panelData.networkIp, secondsRemaining(now));
+        ps.lastRender = now;
+      }
+      break;
+
+    case Panel::I2C_SCAN:
+      if (shouldRenderTimed(now)) {
+        showI2CScan(u8g2, secondsRemaining(now));
+        ps.lastRender = now;
+      }
+      break;
+
+    case Panel::RTC_STATUS:
+      if (shouldRenderTimed(now)) {
+        showRtcStatus(u8g2, secondsRemaining(now));
+        ps.lastRender = now;
+      }
+      break;
+
+    case Panel::ERROR_MESSAGE:
+      if (shouldRenderTimed(now)) {
+        showErrorMessage(u8g2, ps.panelData.errorMessage, secondsRemaining(now));
+        ps.lastRender = now;
+      }
+      break;
   }
 }

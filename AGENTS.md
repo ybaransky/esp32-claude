@@ -83,7 +83,7 @@ The AP always comes up at **192.168.4.1**. A captive portal (DNS wildcard + HTTP
 
 ## Web API
 
-All endpoints return JSON. The page at `/` polls `/api/sensors` every 2 seconds via `fetch`.
+All endpoints return JSON. The page at `/` polls live sensor data every 1 second via `fetch`.
 
 | Route | Response |
 |-------|----------|
@@ -105,12 +105,13 @@ Every request is logged to Serial: `[HTTP] METHOD /path <- client-ip  => status`
 | `src/main.cpp` | App setup and main loop orchestration: ticks buttons/RTC/web, schedules sensor reads, renders frames |
 | `src/hardware.h/.cpp` | Pin/address constants, I2C bus scanner |
 | `src/sensors.h/.cpp` | BMP280 + SHT31 init and read |
-| `src/graph.h/.cpp` | Scrolling temperature-delta graph: data bounds, history buffer, rendering |
-| `src/histogram.h/.cpp` | Temperature-delta frequency histogram: bins, centering, rendering |
+| `src/graph.h/.cpp` | Scrolling temperature-delta graph data: bounds and history buffer |
+| `src/histogram.h/.cpp` | Temperature-delta frequency histogram data: bins, centering, sample count |
 | `src/display.h/.cpp` | U8G2 display init (`displayBegin()`, `displayDevice()`) |
+| `src/display_views.h/.cpp` | OLED rendering for graph, histogram, splash, menu, network, I2C scan, RTC status, and error panels |
 | `src/panel_manager.h/.cpp` | Panel lifecycle: activation, priority queue, expiry, render dispatch |
 | `src/button.h/.cpp` | Two-button input: debounce, click/long-press → `ButtonEvent` queue, non-blocking LED feedback pulse |
-| `src/button_event_handler.h/.cpp` | Button event dispatch: maps queued `ButtonEvent`s to panel transitions, graph/histogram commands, I2C scan, network info, and RTC status |
+| `src/button_event_handler.h/.cpp` | Button command processing: maps queued `ButtonEvent`s to panel transitions, graph/histogram commands, I2C scan, network info, and RTC status |
 | `src/rtc_ds3231.h/.cpp` | DS3231 RTC init, 1 Hz SQW ISR, tick, status, time string |
 | `src/config.h/.cpp` | LittleFS mount + `config.json` parsing |
 | `src/web.h/.cpp` | WiFi AP, DNS server, HTTP server, captive portal |
@@ -134,17 +135,17 @@ Every request is logged to Serial: `[HTTP] METHOD /path <- client-ip  => status`
 2. `buttonLedTick()` — service non-blocking LED feedback pulse
 3. `rtcTick()` — service 1 Hz SQW interrupt
 4. `webHandleClients()` — process pending HTTP requests
-5. `processButtonEvents()` — dispatch queued events via `button_event_handler` → panel transitions or data resets
-6. `sensorsUpdate()` — every 1 s: read BMP280 + SHT31, compute `deltaF = bmpF - shtF`; on success call `updateAllData()` (graph, histogram, web); on error show `ERROR_MESSAGE` panel
+5. `buttonCommandsProcess()` — dispatch queued events via `button_event_handler` → panel transitions or data resets
+6. `updateSensors()` — every 1 s: read BMP280 + SHT31, compute `deltaF = bmpF - shtF`; on success update graph, histogram, and web state; on error show `ERROR_MESSAGE` panel
 7. `renderFrame()` — check panel expiry, redraw if panel changed, fresh data, or forced
 
-### Graph rendering (`src/graph.cpp`)
+### Graph rendering (`src/display_views.cpp`)
 - Lifetime min/max of `deltaF` with 5% padding drive Y-axis; falls back to ±0.1 before any data
 - `GRAPH_LEFT = 24`, `GRAPH_TOP = 2`, `GRAPH_BOTTOM = 45` — pixel boundaries
 - `GRAPH_WIDTH = 104` — rolling history buffer size (one sample per pixel column)
 - Status line at y=55: `BMP=XX.XX SHT=XX.XX`; min/max line at y=63
 
-### Histogram (`src/histogram.cpp`)
+### Histogram (`src/display_views.cpp`)
 - Fixed-width bins at 0.01 °F resolution; ±5.00 °F range (1001 bins) centered on first sample
 - `histogramRecenterOnPeak()` recenters the view on the most-frequent bin
 - `histogramReset()` clears all bins and sample count

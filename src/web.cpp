@@ -9,6 +9,7 @@
 static WebServer      server(80);
 static DNSServer      dnsServer;
 static SensorReadings lastSensorReading;
+static bool           dnsRunning = false;
 
 namespace Routes {
     constexpr const char *ROOT = "/";
@@ -200,7 +201,10 @@ void webBegin(const char *ssid, const char *password) {
     Serial.printf("AP \"%s\" started  IP: %s\n", ssid, WiFi.softAPIP().toString().c_str());
 
     // Answer every DNS query with our IP so browsers trigger the captive portal flow.
-    dnsServer.start(53, "*", WiFi.softAPIP());
+    dnsRunning = dnsServer.start(53, "*", WiFi.softAPIP());
+    if (!dnsRunning) {
+        Serial.println("[DNS] Failed to start captive DNS server (no socket available)");
+    }
 
     server.on(Routes::ROOT,          handleRoot);
     server.on(Routes::API_SENSORS,   handleApiSensors);
@@ -221,6 +225,8 @@ void webUpdate(const SensorReadings &readings) {
 }
 
 void webHandleClients() {
-    dnsServer.processNextRequest();
+    if (dnsRunning) {
+        dnsServer.processNextRequest();
+    }
     server.handleClient();
 }

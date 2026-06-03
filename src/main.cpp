@@ -1,15 +1,16 @@
 #include <Arduino.h>
 #include "display.h"
-#include "graph.h"
+#include "display_views.h"
 #include "config.h"
 #include "web.h"
 #include "button.h"
 #include "button_event_handler.h"
-#include "sensors.h"
+#include "graph.h"
 #include "histogram.h"
 #include "panel_manager.h"
 #include "rtc_ds3231.h"
 #include "hardware.h"
+#include "sensors.h"
 
 constexpr unsigned long READ_INTERVAL_MS = 1000;
 
@@ -18,10 +19,9 @@ constexpr unsigned long READ_INTERVAL_MS = 1000;
 // ---------------------------------------------------------------------------
 
 struct AppState {
-  PanelManager  panelMgr;
-  SensorReadings lastReadings       = {};
-  bool           splashShown        = false;
-  unsigned long  lastSensorReadMs   = 0;
+  SensorReadings lastReadings     = {};
+  bool           splashShown      = false;
+  unsigned long  lastSensorReadMs = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -37,24 +37,25 @@ static void updateAllData(const SensorReadings &readings) {
                 readings.bmpF, readings.shtF, readings.deltaF);
 }
 
-static const char* describeSensorFailure(bool bmpError, bool shtError) {
+static const char *describeSensorFailure(bool bmpError, bool shtError) {
   if (bmpError && shtError) return "BMP and SHT";
   if (bmpError) return "BMP";
   return "SHT";
 }
 
-// Returns true if fresh sensor data was successfully read.
-static bool sensorsUpdate(AppState &state, unsigned long now) {
+static bool updateSensors(AppState &state, unsigned long now) {
   if (now - state.lastSensorReadMs < READ_INTERVAL_MS) return false;
 
-  state.lastReadings    = readSensors();
+  state.lastReadings = readSensors();
   state.lastSensorReadMs = now;
 
-  bool bmpError = isnan(state.lastReadings.bmpF);
-  bool shtError = isnan(state.lastReadings.shtF);
+  const bool bmpError = isnan(state.lastReadings.bmpF);
+  const bool shtError = isnan(state.lastReadings.shtF);
 
   if (bmpError || shtError) {
-    state.panelMgr.setPanel(Panel::ERROR_MESSAGE, PanelPayload::error(describeSensorFailure(bmpError, shtError)), now);
+    panelSet(Panel::ERROR_MESSAGE,
+             PanelPayload::error(describeSensorFailure(bmpError, shtError)),
+             now);
     return false;
   }
 
@@ -63,18 +64,18 @@ static bool sensorsUpdate(AppState &state, unsigned long now) {
 }
 
 static void renderFrame(AppState &state, bool freshData, bool forceRedraw, unsigned long now) {
-  state.panelMgr.checkExpiration(now);
+  panelCheckExpiration(now);
 
   U8G2 &display = displayDevice();
-  Panel current = state.panelMgr.getCurrentPanel();
+  Panel current = panelGetCurrent();
 
   if (current == Panel::GRAPH || current == Panel::HISTOGRAM) {
-    if (state.panelMgr.panelChanged() || freshData || forceRedraw) {
-      if (current == Panel::GRAPH) showGraph(display, state.lastReadings);
-      else                         showHistogram(display, state.lastReadings);
+    if (panelHasChanged() || freshData || forceRedraw) {
+      if (current == Panel::GRAPH) showGraph(display, graphBuildViewData(state.lastReadings));
+      else                         showHistogram(display, histogramBuildViewData(state.lastReadings));
     }
   } else {
-    state.panelMgr.render(display, now);
+    panelRender(display, now);
   }
 }
 
@@ -106,7 +107,7 @@ void loop() {
   unsigned long now = millis();
 
   if (!state.splashShown) {
-    state.panelMgr.setPanel(Panel::SPLASH, PanelPayload{}, now);
+    panelSet(Panel::SPLASH, PanelPayload{}, now);
     state.splashShown = true;
   }
 
@@ -115,7 +116,7 @@ void loop() {
   rtcTick();
   webHandleClients();
 
-  bool forceRedraw = processButtonEvents(state.panelMgr, now);
-  bool freshData   = sensorsUpdate(state, now);
+  bool forceRedraw = buttonHandleEvents(now);
+  bool freshData   = updateSensors(state, now);
   renderFrame(state, freshData, forceRedraw, now);
 }
