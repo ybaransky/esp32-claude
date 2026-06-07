@@ -165,14 +165,13 @@ static void drawHistogramXAxis(U8G2 &u8g2, int axisLeftX, int axisCenterX,
 
 static void drawHistogramInfoBox(U8G2 &u8g2, int x, int y, int width,
                                  const char *line1, const char *line2,
-                                 const char *line3, const char *line4) {
+                                 const char *line3) {
   u8g2.setDrawColor(0);
-  u8g2.drawBox(x - 1, GRAPH_TOP, width + 2, 32);
+  u8g2.drawBox(x - 1, GRAPH_TOP, width + 2, 24);
   u8g2.setDrawColor(1);
   u8g2.drawStr(x, y,      line1);
   u8g2.drawStr(x, y + 8,  line2);
   u8g2.drawStr(x, y + 16, line3);
-  u8g2.drawStr(x, y + 24, line4);
 }
 
 static void drawHistogramBars(U8G2 &u8g2, const int *buckets, int count,
@@ -222,15 +221,13 @@ void showHistogram(U8G2 &u8g2, const HistogramViewData &view) {
   const float maxCountDiffValue = view.centerValue +
     static_cast<float>(view.peakBinIndex - HISTOGRAM_CENTER_INDEX) * HISTOGRAM_BIN_SIZE_F;
 
-  char sampleBuf[16], maxFreqBuf[16], currentDiffBuf[16], maxCountDiffBuf[16];
+  char sampleBuf[16], currentDiffBuf[16], maxCountDiffBuf[16];
   snprintf(sampleBuf,       sizeof(sampleBuf),       "N=%lu", static_cast<unsigned long>(view.sampleCount));
-  snprintf(maxFreqBuf,      sizeof(maxFreqBuf),       "M=%d",  yAxisMax);
   snprintf(currentDiffBuf,  sizeof(currentDiffBuf),  "%.2f",  view.readings.deltaF);
   snprintf(maxCountDiffBuf, sizeof(maxCountDiffBuf), "%.2f",  maxCountDiffValue);
 
   int infoWidth = u8g2.getStrWidth(sampleBuf);
-  int w = u8g2.getStrWidth(maxFreqBuf);      if (w > infoWidth) infoWidth = w;
-      w = u8g2.getStrWidth(currentDiffBuf);  if (w > infoWidth) infoWidth = w;
+  int w = u8g2.getStrWidth(currentDiffBuf);  if (w > infoWidth) infoWidth = w;
       w = u8g2.getStrWidth(maxCountDiffBuf); if (w > infoWidth) infoWidth = w;
   const int infoX = DISPLAY_WIDTH - infoWidth - 1;
 
@@ -253,7 +250,7 @@ void showHistogram(U8G2 &u8g2, const HistogramViewData &view) {
   drawHistogramXAxis(u8g2, axisLeftX, axisCenterX, axisRightX,
                      leftValue, view.centerValue, rightValue);
   drawHistogramInfoBox(u8g2, infoX, GRAPH_TOP + 6, infoWidth,
-                       sampleBuf, maxFreqBuf, currentDiffBuf, maxCountDiffBuf);
+                       sampleBuf, currentDiffBuf, maxCountDiffBuf);
 
   if (yAxisMax > 0) {
     drawHistogramBars(u8g2, buckets, activePlotWidth, activePlotLeftX, yAxisMax);
