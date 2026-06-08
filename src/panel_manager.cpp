@@ -6,6 +6,12 @@ static constexpr unsigned long SPLASH_DURATION_MS              = 4000;
 static constexpr unsigned long DEFAULT_TIMED_PANEL_DURATION_MS = 5000;
 static constexpr unsigned long TIMED_PANEL_REFRESH_MS          = 250;
 
+struct PanelSpec {
+  Panel panel;
+  unsigned long durationMs;
+  int priority;
+};
+
 struct PanelRequest {
   Panel         panel;
   unsigned long durationMs;
@@ -25,33 +31,34 @@ struct PanelState {
 
 static PanelState ps;
 
+static constexpr PanelSpec PANEL_SPECS[] = {
+  {Panel::GRAPH,         0,                               0},
+  {Panel::HISTOGRAM,     0,                               0},
+  {Panel::SPLASH,        SPLASH_DURATION_MS,              1},
+  {Panel::MENU,          DEFAULT_TIMED_PANEL_DURATION_MS, 5},
+  {Panel::NETWORK_INFO,  DEFAULT_TIMED_PANEL_DURATION_MS, 10},
+  {Panel::I2C_SCAN,      DEFAULT_TIMED_PANEL_DURATION_MS, 15},
+  {Panel::RTC_STATUS,    DEFAULT_TIMED_PANEL_DURATION_MS, 12},
+  {Panel::ERROR_MESSAGE, DEFAULT_TIMED_PANEL_DURATION_MS, 20},
+};
+
 Panel panelGetCurrent() { return ps.currentPanel; }
 Panel panelGetPrimary() { return ps.primaryPanel; }
 bool  panelHasChanged() { return ps.currentPanel != ps.prevPanel; }
 
-static unsigned long panelDuration(Panel panel) {
-  switch (panel) {
-    case Panel::SPLASH: return SPLASH_DURATION_MS;
-    case Panel::MENU:
-    case Panel::NETWORK_INFO:
-    case Panel::I2C_SCAN:
-    case Panel::RTC_STATUS:
-    case Panel::ERROR_MESSAGE:
-      return DEFAULT_TIMED_PANEL_DURATION_MS;
-    default: return 0;
+static const PanelSpec &panelSpec(Panel panel) {
+  for (const PanelSpec &spec : PANEL_SPECS) {
+    if (spec.panel == panel) return spec;
   }
+  return PANEL_SPECS[0];
+}
+
+static unsigned long panelDuration(Panel panel) {
+  return panelSpec(panel).durationMs;
 }
 
 static int panelPriority(Panel panel) {
-  switch (panel) {
-    case Panel::ERROR_MESSAGE: return 20;
-    case Panel::I2C_SCAN:      return 15;
-    case Panel::RTC_STATUS:    return 12;
-    case Panel::NETWORK_INFO:  return 10;
-    case Panel::MENU:          return 5;
-    case Panel::SPLASH:        return 1;
-    default:                   return 0;
-  }
+  return panelSpec(panel).priority;
 }
 
 static void activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now) {
@@ -141,52 +148,56 @@ static unsigned long secondsRemaining(unsigned long now) {
   return (ps.panelUntil > now) ? ((ps.panelUntil - now + 999UL) / 1000UL) : 0;
 }
 
+static void markRendered(unsigned long now) {
+  ps.lastRender = now;
+}
+
 void panelRender(U8G2 &u8g2, unsigned long now) {
   switch (ps.currentPanel) {
     case Panel::GRAPH:
     case Panel::HISTOGRAM:
-      ps.lastRender = now;
+      markRendered(now);
       break;
 
     case Panel::SPLASH:
       if (shouldRenderTimed(now)) {
         showSplash(u8g2, secondsRemaining(now));
-        ps.lastRender = now;
+        markRendered(now);
       }
       break;
 
     case Panel::MENU:
       if (shouldRenderTimed(now)) {
         showMenu(u8g2, secondsRemaining(now));
-        ps.lastRender = now;
+        markRendered(now);
       }
       break;
 
     case Panel::NETWORK_INFO:
       if (shouldRenderTimed(now)) {
         showNetworkInfo(u8g2, ps.panelData.networkSsid, ps.panelData.networkIp, secondsRemaining(now));
-        ps.lastRender = now;
+        markRendered(now);
       }
       break;
 
     case Panel::I2C_SCAN:
       if (shouldRenderTimed(now)) {
         showI2CScan(u8g2, secondsRemaining(now));
-        ps.lastRender = now;
+        markRendered(now);
       }
       break;
 
     case Panel::RTC_STATUS:
       if (shouldRenderTimed(now)) {
         showRtcStatus(u8g2, secondsRemaining(now));
-        ps.lastRender = now;
+        markRendered(now);
       }
       break;
 
     case Panel::ERROR_MESSAGE:
       if (shouldRenderTimed(now)) {
         showErrorMessage(u8g2, ps.panelData.errorMessage, secondsRemaining(now));
-        ps.lastRender = now;
+        markRendered(now);
       }
       break;
   }

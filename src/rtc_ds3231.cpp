@@ -93,7 +93,8 @@ bool rtcBegin() {
   pinMode(Hardware::Pins::RTC_SQW, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(Hardware::Pins::RTC_SQW), onSQWPulse, RISING);
 
-  Serial.println("[RTC] DS3231 initialized, SQW=1Hz on GPIO2 (RISING, INPUT_PULLUP)");
+  Serial.printf("[RTC] DS3231 initialized, SQW=1Hz on GPIO%u (RISING, INPUT_PULLUP)\n",
+                Hardware::Pins::RTC_SQW);
   return true;
 }
 

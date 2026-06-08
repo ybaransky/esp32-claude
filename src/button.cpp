@@ -47,11 +47,11 @@ static void handleButtonAction(const char *message, ButtonEvent event = ButtonEv
 }
 
 static void onBtn1Click() {
-    handleButtonAction("[BTN1] Single press", ButtonEvent::HISTOGRAM_TOGGLE);
+    handleButtonAction("[BTN1] Single press", ButtonEvent::TOGGLE_PRIMARY_PANEL);
 }
 
 static void onBtn1DoubleClick() {
-    handleButtonAction("[BTN1] Double click", ButtonEvent::PANEL_DATA_RESET);
+    handleButtonAction("[BTN1] Double click", ButtonEvent::RESET_CURRENT_PANEL_DATA);
 }
 
 static void onBtn1MultiClick() {
@@ -59,15 +59,15 @@ static void onBtn1MultiClick() {
 }
 
 static void onBtn1LongPressStart() {
-    handleButtonAction("[BTN1] Long press", ButtonEvent::MENU);
+    handleButtonAction("[BTN1] Long press", ButtonEvent::SHOW_MENU_OR_RECENTER_HISTOGRAM);
 }
 
 static void onBtn2Click() {
-    handleButtonAction("[BTN2] Single click", ButtonEvent::NETWORK_INFO);
+    handleButtonAction("[BTN2] Single click", ButtonEvent::SHOW_NETWORK_INFO);
 }
 
 static void onBtn2DoubleClick() {
-    handleButtonAction("[BTN2] Double click", ButtonEvent::I2C_SCAN);
+    handleButtonAction("[BTN2] Double click", ButtonEvent::SHOW_I2C_SCAN);
 }
 
 static void onBtn2MultiClick() {
@@ -75,7 +75,7 @@ static void onBtn2MultiClick() {
 }
 
 static void onBtn2LongPressStart() {
-    handleButtonAction("[BTN2] Long press", ButtonEvent::RTC_STATUS);
+    handleButtonAction("[BTN2] Long press", ButtonEvent::SHOW_RTC_STATUS);
 }
 
 void buttonBegin() {

@@ -4,7 +4,7 @@
 
 // Each bin represents exactly one scaled integer value (reading * 100).
 // The first reading anchors the center bin; all others index relative to it.
-// Supports ±HISTOGRAM_MAX_HALF_RANGE scaled units (±5.00°F) from center.
+// Supports +/-HISTOGRAM_MAX_HALF_RANGE scaled units (+/-5.00 F) from center.
 constexpr int32_t HISTOGRAM_MAX_HALF_RANGE = 500;
 constexpr int     HISTOGRAM_BIN_COUNT      = 2 * HISTOGRAM_MAX_HALF_RANGE + 1;
 constexpr int     HISTOGRAM_CENTER_INDEX   = HISTOGRAM_MAX_HALF_RANGE;

@@ -89,7 +89,7 @@ void setup() {
   Serial.println("\n[SETUP] Starting up...");
 
   displayBegin();
-  sensorsBegin(Hardware::Pins::I2C_SDA, Hardware::Pins::I2C_SCL);
+  sensorsBegin();
 
   if (!rtcBegin()) {
     Serial.printf("[RTC] Init failed: %s\n", rtcGetStatus().error.c_str());

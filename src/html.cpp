@@ -6,7 +6,7 @@ const char INDEX_HTML[] = R"rawliteral(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Typcial Temperature Sensor Variability</title>
+  <title>Typical Temperature Sensor Variability</title>
   <style>
     body { font-family: sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; background: #fff; }
     h1   { font-size: 1.3rem; color: #333; }

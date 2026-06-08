@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Typical Temperature Sensor Variability</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, sans-serif; }
+    body { max-width: 420px; margin: 32px auto; padding: 0 16px; background: #f8f9fb; color: #1f252b; }
+    h1 { margin: 0 0 16px; font-size: 1.25rem; }
+    .reading { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: baseline; padding: 12px 0; border-top: 1px solid #d8dde3; }
+    .label { color: #59636f; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .value { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .unit { color: #59636f; font-size: 0.95rem; }
+    .chart { margin-top: 14px; padding-top: 12px; border-top: 1px solid #d8dde3; }
+    .chart-label { margin-bottom: 6px; color: #59636f; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    canvas { width: 100%; height: 140px; display: block; background: #fff; border: 1px solid #d8dde3; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Temperature Sensor Variability</h1>
+
+  <div class="reading">
+    <div>
+      <div class="label">BMP280 Temperature</div>
+      <span class="value" id="bmp">--</span><span class="unit"> deg F</span>
+    </div>
+  </div>
+  <div class="reading">
+    <div>
+      <div class="label">SHT31 Temperature</div>
+      <span class="value" id="sht">--</span><span class="unit"> deg F</span>
+    </div>
+  </div>
+  <div class="reading">
+    <div>
+      <div class="label">Difference (BMP - SHT)</div>
+      <span class="value" id="diff">--</span><span class="unit"> deg F</span>
+    </div>
+  </div>
+
+  <div class="chart">
+    <div class="chart-label">Difference Trend</div>
+    <canvas id="graph" width="360" height="140"></canvas>
+  </div>
+  <div class="chart">
+    <div class="chart-label">Difference Histogram</div>
+    <canvas id="histogram" width="360" height="140"></canvas>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    function format(value, forceSign = false) {
+      if (!Number.isFinite(value)) return '--';
+      return (forceSign && value >= 0 ? '+' : '') + value.toFixed(2);
+    }
+
+    function clearCanvas(canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return ctx;
+    }
+
+    function drawAxes(ctx, left, top, right, bottom) {
+      ctx.strokeStyle = '#ccd3da';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(left, top);
+      ctx.lineTo(left, bottom);
+      ctx.lineTo(right, bottom);
+      ctx.stroke();
+    }
+
+    function drawGraph(history) {
+      const canvas = $('graph');
+      const ctx = clearCanvas(canvas);
+      const left = 28, top = 8, right = canvas.width - 8, bottom = canvas.height - 22;
+      drawAxes(ctx, left, top, right, bottom);
+      if (!history.length) return;
+
+      let min = Math.min(...history);
+      let max = Math.max(...history);
+      const pad = Math.max(0.1, (max - min) * 0.08);
+      min -= pad;
+      max += pad;
+
+      const yFor = value => bottom - ((value - min) / (max - min)) * (bottom - top);
+      ctx.strokeStyle = '#00796b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      history.forEach((value, index) => {
+        const x = left + index * (right - left) / Math.max(1, history.length - 1);
+        const y = yFor(value);
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = '#59636f';
+      ctx.font = '10px Arial';
+      ctx.fillText(max.toFixed(2), 2, top + 8);
+      ctx.fillText(min.toFixed(2), 2, bottom);
+      ctx.textAlign = 'right';
+      ctx.fillText('now', right, canvas.height - 6);
+      ctx.textAlign = 'left';
+    }
+
+    function drawHistogram(histogram) {
+      const canvas = $('histogram');
+      const ctx = clearCanvas(canvas);
+      const left = 30, top = 8, right = canvas.width - 8, bottom = canvas.height - 22;
+      drawAxes(ctx, left, top, right, bottom);
+
+      const bins = Array.isArray(histogram.bins) ? histogram.bins : [];
+      if (!bins.length) return;
+
+      const plotWidth = right - left + 1;
+      const buckets = new Array(plotWidth).fill(0);
+      let maxBucket = 0;
+      for (let x = 0; x < plotWidth; x++) {
+        const start = Math.floor(x * bins.length / plotWidth);
+        const end = Math.floor((x + 1) * bins.length / plotWidth);
+        for (let i = start; i < end; i++) buckets[x] += Number(bins[i] || 0);
+        maxBucket = Math.max(maxBucket, buckets[x]);
+      }
+
+      const yMax = Math.max(1, Number(histogram.latchedMax || 0), maxBucket);
+      ctx.strokeStyle = '#1976d2';
+      buckets.forEach((count, x) => {
+        if (count <= 0) return;
+        const height = Math.max(1, Math.round(count * (bottom - top) / yMax));
+        ctx.beginPath();
+        ctx.moveTo(left + x + 0.5, bottom);
+        ctx.lineTo(left + x + 0.5, bottom - height);
+        ctx.stroke();
+      });
+
+      const halfRange = Math.max(1, Number(histogram.halfRange || 1)) / Math.max(1, Number(histogram.scale || 100));
+      const center = Number(histogram.center || 0);
+      ctx.fillStyle = '#59636f';
+      ctx.font = '10px Arial';
+      ctx.fillText(String(yMax), 2, top + 8);
+      ctx.fillText('0', 2, bottom);
+      ctx.textAlign = 'center';
+      ctx.fillText((center - halfRange).toFixed(2), left, canvas.height - 6);
+      ctx.fillText(center.toFixed(2), (left + right) / 2, canvas.height - 6);
+      ctx.fillText((center + halfRange).toFixed(2), right, canvas.height - 6);
+      ctx.textAlign = 'left';
+    }
+
+    function applyState(state) {
+      $('bmp').textContent = format(Number(state.bmp));
+      $('sht').textContent = format(Number(state.sht));
+      $('diff').textContent = format(Number(state.diff), true);
+      drawGraph((state.graph && state.graph.history || []).map(Number));
+      drawHistogram(state.histogram || {});
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch('/api/state');
+        applyState(await response.json());
+      } catch (error) {
+        // Captive portal pages should stay quiet if a poll misses.
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 1000);
+  </script>
+</body>
+</html>

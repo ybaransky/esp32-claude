@@ -25,7 +25,7 @@ ApConfig loadApConfig() {
         return cfg;
     }
 
-    cfg.ssid     = doc["ssid"]     | "ESP32-Sensor";
+    cfg.ssid     = doc["ssid"]     | "ClimateFraud";
     cfg.password = doc["password"] | "12345678";
     return cfg;
 }

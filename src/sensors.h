@@ -8,5 +8,5 @@ struct SensorReadings {
     unsigned long readTime;
 };
 
-void sensorsBegin(uint8_t sdaPin, uint8_t sclPin);
+void sensorsBegin();
 const SensorReadings& readSensors(bool force = false);

@@ -17,7 +17,7 @@ static void showNetworkInfo(unsigned long now) {
   panelSet(Panel::NETWORK_INFO, PanelPayload::networkInfo(ssid, ip), now);
 }
 
-static bool handleMenuCommand(unsigned long now) {
+static bool showMenuOrRecenterHistogram(unsigned long now) {
   if (panelGetCurrent() != Panel::HISTOGRAM) {
     showPanel(Panel::MENU, now);
     return false;
@@ -57,28 +57,28 @@ bool buttonHandleEvents(unsigned long now) {
 
   while (buttonHasEvent()) {
     switch (buttonNextEvent()) {
-      case ButtonEvent::MENU:
-        forceRedraw |= handleMenuCommand(now);
+      case ButtonEvent::SHOW_MENU_OR_RECENTER_HISTOGRAM:
+        forceRedraw |= showMenuOrRecenterHistogram(now);
         break;
 
-      case ButtonEvent::I2C_SCAN:
+      case ButtonEvent::SHOW_I2C_SCAN:
         i2cScan();
         showPanel(Panel::I2C_SCAN, now);
         break;
 
-      case ButtonEvent::RTC_STATUS:
+      case ButtonEvent::SHOW_RTC_STATUS:
         showPanel(Panel::RTC_STATUS, now);
         break;
 
-      case ButtonEvent::NETWORK_INFO:
+      case ButtonEvent::SHOW_NETWORK_INFO:
         showNetworkInfo(now);
         break;
 
-      case ButtonEvent::HISTOGRAM_TOGGLE:
+      case ButtonEvent::TOGGLE_PRIMARY_PANEL:
         forceRedraw |= togglePrimaryPanel(now);
         break;
 
-      case ButtonEvent::PANEL_DATA_RESET:
+      case ButtonEvent::RESET_CURRENT_PANEL_DATA:
         forceRedraw |= resetCurrentPanelData();
         break;
 

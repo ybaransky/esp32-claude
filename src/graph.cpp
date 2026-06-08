@@ -10,13 +10,6 @@ struct GraphState {
   Bounds graphBounds;
 };
 
-static GraphState graphState = {
-  {},
-  0,
-  {0.0f, 0.0f, false},
-  {0.0f, 0.0f, false},
-};
-
 static void updateBounds(Bounds &bounds, float data) {
   if (!bounds.initialized) {
     bounds.initialized = true;
@@ -28,41 +21,76 @@ static void updateBounds(Bounds &bounds, float data) {
   }
 }
 
-void graphResetBounds() {
-  Serial.println("[GRAPH] Resetting graph bounds");
-  if (graphState.historyCount <= 0) {
-    Serial.println("[GRAPH] No graph history; bounds reset skipped");
-    return;
+class GraphModel {
+public:
+  void resetViewBounds() {
+    Serial.println("[GRAPH] Resetting graph bounds");
+    if (state.historyCount <= 0) {
+      Serial.println("[GRAPH] No graph history; bounds reset skipped");
+      return;
+    }
+
+    float min = state.history[0];
+    float max = state.history[0];
+    for (int i = 1; i < state.historyCount; i++) {
+      min = fminf(min, state.history[i]);
+      max = fmaxf(max, state.history[i]);
+    }
+    state.graphBounds = {min, max, true};
   }
 
-  float min = graphState.history[0];
-  float max = graphState.history[0];
-  for (int i=1; i < graphState.historyCount; i++) {
-    min = fminf(min, graphState.history[i]);
-    max = fmaxf(max, graphState.history[i]);
+  void updateBounds(float data) {
+    ::updateBounds(state.totalBounds, data);
+    ::updateBounds(state.graphBounds, data);
   }
-  graphState.graphBounds = {min, max, true};
+
+  void appendSample(float data) {
+    if (state.historyCount < GRAPH_WIDTH) {
+      state.history[state.historyCount++] = data;
+      return;
+    }
+    memmove(state.history, state.history + 1, sizeof(float) * (GRAPH_WIDTH - 1));
+    state.history[GRAPH_WIDTH - 1] = data;
+  }
+
+  void reset() {
+    state = {};
+  }
+
+  Bounds graphBounds() const { return state.graphBounds; }
+  Bounds totalBounds() const { return state.totalBounds; }
+  const float *history() const { return state.history; }
+  int historyCount() const { return state.historyCount; }
+
+private:
+  GraphState state = {
+    {},
+    0,
+    {0.0f, 0.0f, false},
+    {0.0f, 0.0f, false},
+  };
+};
+
+static GraphModel graphModel;
+
+void graphResetBounds() {
+  graphModel.resetViewBounds();
 }
+
 void graphUpdateBounds(float data) {
-  updateBounds(graphState.totalBounds, data);
-  updateBounds(graphState.graphBounds, data);
+  graphModel.updateBounds(data);
 }
 
 void graphUpdateData(float data) {
-  if (graphState.historyCount < GRAPH_WIDTH) {
-    graphState.history[graphState.historyCount++] = data;
-    return;
-  }
-  memmove(graphState.history, graphState.history + 1, sizeof(float) * (GRAPH_WIDTH - 1));
-  graphState.history[GRAPH_WIDTH - 1] = data;
+  graphModel.appendSample(data);
 }
 
 void graphResetState() {
   Serial.println("[GRAPH] Resetting graph bounds/history");
-  graphState = {};
+  graphModel.reset();
 }
 
-Bounds graphGetGraphBounds() { return graphState.graphBounds; }
-Bounds graphGetTotalBounds() { return graphState.totalBounds; }
-const float *graphGetHistory() { return graphState.history; }
-int graphGetHistoryCount()    { return graphState.historyCount; }
+Bounds graphGetGraphBounds() { return graphModel.graphBounds(); }
+Bounds graphGetTotalBounds() { return graphModel.totalBounds(); }
+const float *graphGetHistory() { return graphModel.history(); }
+int graphGetHistoryCount()    { return graphModel.historyCount(); }
