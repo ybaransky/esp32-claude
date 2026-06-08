@@ -1,4 +1,5 @@
 #include "panel_manager.h"
+
 #include "display_views.h"
 
 static constexpr uint8_t       PANEL_QUEUE_CAPACITY            = 6;
@@ -18,19 +19,6 @@ struct PanelRequest {
   PanelPayload  data;
 };
 
-struct PanelState {
-  Panel         currentPanel     = Panel::GRAPH;
-  Panel         prevPanel        = Panel::GRAPH;
-  Panel         primaryPanel     = Panel::GRAPH;
-  unsigned long panelUntil       = 0;
-  unsigned long lastRender       = 0;
-  PanelPayload  panelData;
-  PanelRequest  queuedPanels[PANEL_QUEUE_CAPACITY];
-  uint8_t       queuedPanelCount = 0;
-};
-
-static PanelState ps;
-
 static constexpr PanelSpec PANEL_SPECS[] = {
   {Panel::GRAPH,         0,                               0},
   {Panel::HISTOGRAM,     0,                               0},
@@ -42,163 +30,211 @@ static constexpr PanelSpec PANEL_SPECS[] = {
   {Panel::ERROR_MESSAGE, DEFAULT_TIMED_PANEL_DURATION_MS, 20},
 };
 
-Panel panelGetCurrent() { return ps.currentPanel; }
-Panel panelGetPrimary() { return ps.primaryPanel; }
-bool  panelHasChanged() { return ps.currentPanel != ps.prevPanel; }
+class PanelManager {
+public:
+  Panel current() const { return currentPanel; }
+  Panel primary() const { return primaryPanel; }
+  bool hasChanged() const { return currentPanel != prevPanel; }
 
-static const PanelSpec &panelSpec(Panel panel) {
-  for (const PanelSpec &spec : PANEL_SPECS) {
-    if (spec.panel == panel) return spec;
+  void set(Panel panel, const PanelPayload &data, unsigned long now) {
+    const unsigned long durationMs  = duration(panel);
+    const bool          dataChanged = !(panelData == data);
+
+    if (isPrimaryPanel(panel)) {
+      primaryPanel = panel;
+    }
+
+    if (panel == currentPanel) {
+      if (durationMs != 0) panelUntil = now + durationMs;
+      if (dataChanged)     panelData  = data;
+      return;
+    }
+
+    if (isPrimaryPanel(currentPanel)) {
+      activate(panel, durationMs, data, now);
+      return;
+    }
+
+    if (shouldInterruptCurrentPanel(panel)) {
+      const unsigned long remainingMs = (panelUntil > now) ? (panelUntil - now) : 0;
+      if (currentPanel != Panel::GRAPH) {
+        enqueueFront(currentPanel, remainingMs, panelData);
+      }
+      activate(panel, durationMs, data, now);
+      return;
+    }
+
+    enqueueBack(panel, durationMs, data);
   }
-  return PANEL_SPECS[0];
-}
 
-static unsigned long panelDuration(Panel panel) {
-  return panelSpec(panel).durationMs;
-}
+  void checkExpiration(unsigned long now) {
+    if (panelUntil == 0 || now < panelUntil) return;
 
-static int panelPriority(Panel panel) {
-  return panelSpec(panel).priority;
-}
+    PanelRequest next;
+    if (dequeue(next)) {
+      activate(next.panel, next.durationMs, next.data, now);
+      return;
+    }
 
-static void activatePanel(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now) {
-  ps.prevPanel    = ps.currentPanel;
-  ps.currentPanel = panel;
-  ps.panelUntil   = (durationMs == 0) ? 0 : now + durationMs;
-  ps.panelData    = data;
-  ps.lastRender   = 0;
-}
-
-static bool enqueuePanelBack(Panel panel, unsigned long durationMs, const PanelPayload &data) {
-  if (ps.queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
-  ps.queuedPanels[ps.queuedPanelCount++] = {panel, durationMs, data};
-  return true;
-}
-
-static bool enqueuePanelFront(Panel panel, unsigned long durationMs, const PanelPayload &data) {
-  if (ps.queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
-  for (int i = ps.queuedPanelCount; i > 0; --i) {
-    ps.queuedPanels[i] = ps.queuedPanels[i - 1];
+    prevPanel = currentPanel;
+    currentPanel = primaryPanel;
+    panelUntil = 0;
+    lastRender = 0;
   }
-  ps.queuedPanels[0] = {panel, durationMs, data};
-  ps.queuedPanelCount++;
-  return true;
-}
 
-static bool dequeuePanel(PanelRequest &request) {
-  if (ps.queuedPanelCount == 0) return false;
-  request = ps.queuedPanels[0];
-  for (uint8_t i = 1; i < ps.queuedPanelCount; ++i) {
-    ps.queuedPanels[i - 1] = ps.queuedPanels[i];
+  void render(U8G2 &u8g2, unsigned long now) {
+    switch (currentPanel) {
+      case Panel::GRAPH:
+      case Panel::HISTOGRAM:
+        markRendered(now);
+        break;
+
+      case Panel::SPLASH:
+        if (shouldRenderTimed(now)) {
+          showSplash(u8g2, secondsRemaining(now));
+          markRendered(now);
+        }
+        break;
+
+      case Panel::MENU:
+        if (shouldRenderTimed(now)) {
+          showMenu(u8g2, secondsRemaining(now));
+          markRendered(now);
+        }
+        break;
+
+      case Panel::NETWORK_INFO:
+        if (shouldRenderTimed(now)) {
+          showNetworkInfo(u8g2, panelData.networkSsid, panelData.networkIp, secondsRemaining(now));
+          markRendered(now);
+        }
+        break;
+
+      case Panel::I2C_SCAN:
+        if (shouldRenderTimed(now)) {
+          showI2CScan(u8g2, secondsRemaining(now));
+          markRendered(now);
+        }
+        break;
+
+      case Panel::RTC_STATUS:
+        if (shouldRenderTimed(now)) {
+          showRtcStatus(u8g2, secondsRemaining(now));
+          markRendered(now);
+        }
+        break;
+
+      case Panel::ERROR_MESSAGE:
+        if (shouldRenderTimed(now)) {
+          showErrorMessage(u8g2, panelData.errorMessage, secondsRemaining(now));
+          markRendered(now);
+        }
+        break;
+    }
   }
-  ps.queuedPanelCount--;
-  return true;
-}
+
+private:
+  static bool isPrimaryPanel(Panel panel) {
+    return panel == Panel::GRAPH || panel == Panel::HISTOGRAM;
+  }
+
+  static const PanelSpec &specFor(Panel panel) {
+    for (const PanelSpec &spec : PANEL_SPECS) {
+      if (spec.panel == panel) return spec;
+    }
+    return PANEL_SPECS[0];
+  }
+
+  static unsigned long duration(Panel panel) {
+    return specFor(panel).durationMs;
+  }
+
+  static int priority(Panel panel) {
+    return specFor(panel).priority;
+  }
+
+  bool shouldInterruptCurrentPanel(Panel panel) const {
+    return panel == Panel::ERROR_MESSAGE && priority(panel) > priority(currentPanel);
+  }
+
+  void activate(Panel panel, unsigned long durationMs, const PanelPayload &data, unsigned long now) {
+    prevPanel    = currentPanel;
+    currentPanel = panel;
+    panelUntil   = (durationMs == 0) ? 0 : now + durationMs;
+    panelData    = data;
+    lastRender   = 0;
+  }
+
+  bool enqueueBack(Panel panel, unsigned long durationMs, const PanelPayload &data) {
+    if (queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
+    queuedPanels[queuedPanelCount++] = {panel, durationMs, data};
+    return true;
+  }
+
+  bool enqueueFront(Panel panel, unsigned long durationMs, const PanelPayload &data) {
+    if (queuedPanelCount >= PANEL_QUEUE_CAPACITY) return false;
+    for (int i = queuedPanelCount; i > 0; --i) {
+      queuedPanels[i] = queuedPanels[i - 1];
+    }
+    queuedPanels[0] = {panel, durationMs, data};
+    queuedPanelCount++;
+    return true;
+  }
+
+  bool dequeue(PanelRequest &request) {
+    if (queuedPanelCount == 0) return false;
+    request = queuedPanels[0];
+    for (uint8_t i = 1; i < queuedPanelCount; ++i) {
+      queuedPanels[i - 1] = queuedPanels[i];
+    }
+    queuedPanelCount--;
+    return true;
+  }
+
+  bool shouldRenderTimed(unsigned long now) const {
+    return hasChanged() || now - lastRender >= TIMED_PANEL_REFRESH_MS;
+  }
+
+  unsigned long secondsRemaining(unsigned long now) const {
+    return (panelUntil > now) ? ((panelUntil - now + 999UL) / 1000UL) : 0;
+  }
+
+  void markRendered(unsigned long now) {
+    lastRender = now;
+  }
+
+  Panel         currentPanel     = Panel::GRAPH;
+  Panel         prevPanel        = Panel::GRAPH;
+  Panel         primaryPanel     = Panel::GRAPH;
+  unsigned long panelUntil       = 0;
+  unsigned long lastRender       = 0;
+  PanelPayload  panelData;
+  PanelRequest  queuedPanels[PANEL_QUEUE_CAPACITY] = {};
+  uint8_t       queuedPanelCount = 0;
+};
+
+static PanelManager panelManager;
 
 void panelSet(Panel panel, const PanelPayload &data, unsigned long now) {
-  const unsigned long durationMs  = panelDuration(panel);
-  const bool          dataChanged = !(ps.panelData == data);
-
-  if (panel == Panel::GRAPH || panel == Panel::HISTOGRAM) {
-    ps.primaryPanel = panel;
-  }
-
-  if (panel == ps.currentPanel) {
-    if (durationMs != 0) ps.panelUntil = now + durationMs;
-    if (dataChanged)     ps.panelData  = data;
-    return;
-  }
-
-  if (ps.currentPanel == Panel::GRAPH || ps.currentPanel == Panel::HISTOGRAM) {
-    activatePanel(panel, durationMs, data, now);
-    return;
-  }
-
-  if (panelPriority(panel) > panelPriority(ps.currentPanel) && panel == Panel::ERROR_MESSAGE) {
-    unsigned long remainingMs = (ps.panelUntil > now) ? (ps.panelUntil - now) : 0;
-    if (ps.currentPanel != Panel::GRAPH) {
-      enqueuePanelFront(ps.currentPanel, remainingMs, ps.panelData);
-    }
-    activatePanel(panel, durationMs, data, now);
-    return;
-  }
-
-  enqueuePanelBack(panel, durationMs, data);
+  panelManager.set(panel, data, now);
 }
 
 void panelCheckExpiration(unsigned long now) {
-  if (ps.panelUntil == 0 || now < ps.panelUntil) return;
-
-  PanelRequest next;
-  if (dequeuePanel(next)) {
-    activatePanel(next.panel, next.durationMs, next.data, now);
-  } else {
-    ps.prevPanel    = ps.currentPanel;
-    ps.currentPanel = ps.primaryPanel;
-    ps.panelUntil   = 0;
-    ps.lastRender   = 0;
-  }
-}
-
-static bool shouldRenderTimed(unsigned long now) {
-  return panelHasChanged() || now - ps.lastRender >= TIMED_PANEL_REFRESH_MS;
-}
-
-static unsigned long secondsRemaining(unsigned long now) {
-  return (ps.panelUntil > now) ? ((ps.panelUntil - now + 999UL) / 1000UL) : 0;
-}
-
-static void markRendered(unsigned long now) {
-  ps.lastRender = now;
+  panelManager.checkExpiration(now);
 }
 
 void panelRender(U8G2 &u8g2, unsigned long now) {
-  switch (ps.currentPanel) {
-    case Panel::GRAPH:
-    case Panel::HISTOGRAM:
-      markRendered(now);
-      break;
+  panelManager.render(u8g2, now);
+}
 
-    case Panel::SPLASH:
-      if (shouldRenderTimed(now)) {
-        showSplash(u8g2, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
+Panel panelGetCurrent() {
+  return panelManager.current();
+}
 
-    case Panel::MENU:
-      if (shouldRenderTimed(now)) {
-        showMenu(u8g2, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
+Panel panelGetPrimary() {
+  return panelManager.primary();
+}
 
-    case Panel::NETWORK_INFO:
-      if (shouldRenderTimed(now)) {
-        showNetworkInfo(u8g2, ps.panelData.networkSsid, ps.panelData.networkIp, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-
-    case Panel::I2C_SCAN:
-      if (shouldRenderTimed(now)) {
-        showI2CScan(u8g2, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-
-    case Panel::RTC_STATUS:
-      if (shouldRenderTimed(now)) {
-        showRtcStatus(u8g2, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-
-    case Panel::ERROR_MESSAGE:
-      if (shouldRenderTimed(now)) {
-        showErrorMessage(u8g2, ps.panelData.errorMessage, secondsRemaining(now));
-        markRendered(now);
-      }
-      break;
-  }
+bool panelHasChanged() {
+  return panelManager.hasChanged();
 }
