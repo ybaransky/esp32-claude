@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 You are a senior software engineer with 15+ years of experience. When providing code solutions, follow these principles:
 
@@ -73,28 +73,32 @@ Upload speed: **921600**. Serial monitor baud rate: **115200**.
 
 ## AP Config
 
-`data/config.json` is uploaded to LittleFS and read at boot. If the file is missing or unparseable, defaults are used silently.
+`data/config.json` is the only file on LittleFS. It is read at boot; if missing or unparseable, defaults are used silently.
 
 ```json
-{ "ssid": "ESP32-Sensor", "password": "12345678" }
+{ "ssid": "ClimateFraud", "password": "12345678" }
 ```
 
 The AP always comes up at **192.168.4.1**. A captive portal (DNS wildcard + HTTP redirect) causes phones to open the page automatically on connect.
 
 ## Web API
 
-All endpoints return JSON. The page at `/` polls live sensor data every 1 second via `fetch`.
+All endpoints return JSON except `/` and the captive redirect. Every request is logged to Serial: `[HTTP] METHOD /path <- client-ip  => status`.
 
 | Route | Response |
 |-------|----------|
-| `GET /` | HTML dashboard |
+| `GET /` | HTML dashboard (embedded in firmware via `html.h`) |
 | `GET /api/sensors` | `{"bmp":F,"sht":F,"diff":F}` |
 | `GET /api/bmp` | `{"bmp":F}` |
 | `GET /api/sht` | `{"sht":F}` |
 | `GET /api/diff` | `{"diff":F}` |
+| `GET /api/live` | `{"bmp":F,"sht":F,"diff":F,"graphCount":N,"histSampleCount":N}` — lightweight poll (~112 B) |
+| `GET /api/graph` | full graph history JSON |
+| `GET /api/histogram` | full histogram JSON (~15 KB) |
+| `GET /api/state` | combined: bmp/sht/diff + graph + histogram (~15 KB) |
 | any other path | 302 → `http://192.168.4.1/` |
 
-Every request is logged to Serial: `[HTTP] METHOD /path <- client-ip  => status`.
+The dashboard uses a two-tier update strategy: poll `/api/live` every second; if the histogram sample count advanced by exactly one, apply an incremental client-side update. Any gap, reset, or recenter triggers a full `/api/state` fetch.
 
 ## Architecture
 
@@ -105,30 +109,34 @@ Every request is logged to Serial: `[HTTP] METHOD /path <- client-ip  => status`
 | `src/main.cpp` | App setup and main loop orchestration: ticks buttons/RTC/web, schedules sensor reads, renders frames |
 | `src/hardware.h/.cpp` | Pin/address constants, I2C bus scanner |
 | `src/sensors.h/.cpp` | BMP280 + SHT31 init and read |
-| `src/graph.h/.cpp` | Scrolling temperature-delta graph data: bounds and history buffer |
-| `src/histogram.h/.cpp` | Temperature-delta frequency histogram data: bins, centering, sample count |
+| `src/display_layout.h` | Shared OLED pixel constants (`GRAPH_LEFT/TOP/BOTTOM/WIDTH`, `STATUS_BASELINE_Y`, etc.) |
+| `src/graph.h/.cpp` | `GraphModel` class: rolling history buffer, view/total bounds tracking |
+| `src/histogram.h/.cpp` | `HistogramModel` class: fixed-width bins, centering, peak recenter, sample count |
 | `src/display.h/.cpp` | U8G2 display init (`displayBegin()`, `displayDevice()`) |
-| `src/display_views.h/.cpp` | OLED rendering for graph, histogram, splash, menu, network, I2C scan, RTC status, and error panels |
-| `src/panel_manager.h/.cpp` | Panel lifecycle: activation, priority queue, expiry, render dispatch |
+| `src/display_views.h/.cpp` | OLED rendering for graph and histogram panels |
+| `src/status_panel_views.cpp` | OLED rendering for splash, menu, network info, I2C scan, RTC status, and error panels |
+| `src/panel_manager.h/.cpp` | Panel lifecycle: `PanelSpec` lookup table, activation, priority queue, expiry, render dispatch |
 | `src/button.h/.cpp` | Two-button input: debounce, click/long-press → `ButtonEvent` queue, non-blocking LED feedback pulse |
 | `src/button_event_handler.h/.cpp` | Button command processing: maps queued `ButtonEvent`s to panel transitions, graph/histogram commands, I2C scan, network info, and RTC status |
 | `src/rtc_ds3231.h/.cpp` | DS3231 RTC init, 1 Hz SQW ISR, tick, status, time string |
 | `src/config.h/.cpp` | LittleFS mount + `config.json` parsing |
 | `src/web.h/.cpp` | WiFi AP, DNS server, HTTP server, captive portal |
-| `src/html.h/.cpp` | HTML/JS dashboard page generation |
+| `src/html.h/.cpp` | HTML/JS dashboard page (embedded C string served from RAM) |
 
 ### Panels (`enum class Panel`)
 
 | Panel | Trigger | Duration |
 |-------|---------|----------|
-| `SPLASH` | On boot | ~3 s |
-| `GRAPH` | Default / Button toggle | Persistent |
-| `HISTOGRAM` | Button toggle | Persistent |
-| `MENU` | Button 2 short press | ~3 s |
-| `NETWORK_INFO` | Button event | ~5 s |
-| `I2C_SCAN` | Button event | ~5 s |
-| `RTC_STATUS` | Button event | ~5 s |
+| `SPLASH` | On boot | ~4 s |
+| `GRAPH` | Default / Btn1 single click | Persistent |
+| `HISTOGRAM` | Btn1 single click | Persistent |
+| `MENU` | Btn1 long press (when not on histogram) | ~5 s |
+| `NETWORK_INFO` | Btn2 single click | ~5 s |
+| `I2C_SCAN` | Btn2 double click | ~5 s |
+| `RTC_STATUS` | Btn2 long press | ~5 s |
 | `ERROR_MESSAGE` | Sensor read failure | ~5 s |
+
+Btn1 long press on the histogram panel recenters on the peak bin instead of showing the menu. Btn1 double click resets data for the current primary panel (graph or histogram).
 
 ### Data flow per loop iteration
 1. `buttonTick()` — debounce buttons, enqueue `ButtonEvent`s
@@ -141,14 +149,14 @@ Every request is logged to Serial: `[HTTP] METHOD /path <- client-ip  => status`
 
 ### Graph rendering (`src/display_views.cpp`)
 - Lifetime min/max of `deltaF` with 5% padding drive Y-axis; falls back to ±0.1 before any data
-- `GRAPH_LEFT = 24`, `GRAPH_TOP = 2`, `GRAPH_BOTTOM = 45` — pixel boundaries
+- Layout constants live in `src/display_layout.h`: `GRAPH_LEFT = 24`, `GRAPH_TOP = 2`, `GRAPH_BOTTOM = 45`
 - `GRAPH_WIDTH = 104` — rolling history buffer size (one sample per pixel column)
 - Status line at y=55: `BMP=XX.XX SHT=XX.XX`; min/max line at y=63
 
 ### Histogram (`src/display_views.cpp`)
 - Fixed-width bins at 0.01 °F resolution; ±5.00 °F range (1001 bins) centered on first sample
-- `histogramRecenterOnPeak()` recenters the view on the most-frequent bin
-- `histogramReset()` clears all bins and sample count
+- `histogramRecenterOnPeak()` recenters the view on the most-frequent bin; also updates `centerScaledValue` and adjusts `minScaledOffset`/`maxScaledOffset`
+- `histogramReset()` clears all bins, offsets, and sample count
 
 ### Captive portal (`src/web.cpp`)
 `webBegin()` polls until `WiFi.softAPIP()` is non-zero before starting the DNS server — calling `dnsServer.start()` with `0.0.0.0` breaks IP connectivity.

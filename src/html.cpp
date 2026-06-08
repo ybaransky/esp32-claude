@@ -281,7 +281,7 @@ const char INDEX_HTML[] = R"rawliteral(
       document.getElementById('diff').textContent = fmt(diff, true);
 
       // Keep low-bandwidth incremental updates only if we received exactly one new sample.
-      if (graphCount === lastGraphCount + 1 && histSampleCount === lastHistSampleCount + 1) {
+      if (histSampleCount === lastHistSampleCount + 1) {
         diffHistory.push(diff);
         while (diffHistory.length > graphCount) {
           diffHistory.shift();
